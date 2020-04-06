@@ -7,7 +7,7 @@ Created on Mon Mar 16 19:43:43 2020
 """
 
 import os
-os.chdir('/Users/ligk2e/Desktop/project_LUAD/')
+os.chdir('/Users/ligk2e/Desktop/project_breast/RBM47/')
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
@@ -19,6 +19,8 @@ import re
 from time import process_time
 import collections
 #import ast
+import matplotlib.pyplot as plt
+import math
 
 ############################################################################################
 # part1: branch2.py, match to existing peptides
@@ -248,7 +250,7 @@ def score_coding_bias(sequence):
         score_tri = norm_usage_dict[triplet]
         score += score_tri
         i += 3
-    score_bias = score/num_triplet # take reciprocal and scale them by multipling 100
+    score_bias = score/num_triplet # scale by the number of triplet in the sequence
     return score_bias
     
 
@@ -630,6 +632,11 @@ def chop_sequence(seq,kmer):   # how to splice sequence, elegant way to use rang
             frag_bucket.append(seq[i:])
     return frag_bucket
 
+##############################################################################################
+# part5: interrogating chromosome stataistics
+#############################################################################################
+    
+
 def ChroDistribution(df):
     chro_array = []
     for i in range(df.shape[0]):
@@ -639,10 +646,43 @@ def ChroDistribution(df):
     freq = collections.Counter(chro_array)
     return freq
 
+'''courtesy by user on stackoverflow'''
+def Round2Precision(value,precision:int=0,mode:str=''): # default argument with specified type
+    assert precision >= 0 # if true, continue, otherwise raise assertError, using for self-check
+    value *= 10 ** precision # if you wanna round by precision, have to do that
+    method = round   # round will base on >.5 or <.5
+    if mode.lower() == 'up': 
+        method = math.ceil     # always round up
+    elif mode.lower() == 'down':
+        method = math.floor   # always round down
+    answer = '{0:.{1}f}'.format(method(value)/10**precision,precision)   
+    return float(answer) 
+
+
+def PlotChroScarse(chro_dict,path):
+    fig = plt.figure()
+    ax = fig.add_axes([0.1,0.1,0.75,0.75])  #[left,bottom, width, height]
+    scarse = {}
+    for chro,attr in chro_dict.items():
+        chro_s = re.split(r'chr',chro)[-1]
+        scarse[chro_s] = Round2Precision(attr[0]/attr[1],2)  # genes per 1 Millon bp
+    x_axis = list(scarse.keys())
+    y_axis = list(scarse.values())
+    ax.bar(x_axis,y_axis)
+    ax.set(xlabel='chromosome',ylabel='genes per 1 Million bp',title='crowdness of human chromosome')
+    
+    #ax.legend()    
+    #plt.show()
+    fig.savefig(path)
+    plt.close(fig)
+    
+        
+    
+
 if __name__ == "__main__":
     start_time = process_time()
     # get increased part
-    df = pd.read_csv('PSI.R1-V7_vs_Healthy.txt',sep='\t')
+    df = pd.read_csv('PSI.RBM47Deletion_vs_noRBM47Deletion.txt',sep='\t')
     
     # load the files, return matched result and cognate whole transcript sequence
     df_ori = GetIncreasedPart(df)
@@ -673,6 +713,9 @@ if __name__ == "__main__":
     
     
     # Pause here to get EnsID query list to upload to Uniprot to get query_result
+    '''
+    go to uniprot, retrieve/mapping, upload the file we just got, choose from Ensembl to uniprotKB
+    '''
     #
     #########################################################################################
     ########################################################################################
@@ -734,7 +777,35 @@ if __name__ == "__main__":
     # summarize the distribution of splicing event in df_all and df_increased
     freq_all = ChroDistribution(df)
     freq_increased = ChroDistribution(df_ori)
-    print(freq_all,freq_increased)
+#    print(freq_all,freq_increased)
+    
+    # continue exploit on chromosomes
+    chro_dict = {
+            'chr1': [1961,248,'Metacentric'],    #[1961genes,248 or so million bp, type of centromere]
+            'chr2': [1194,242,'Submetacentric'],
+            'chr3': [1024,198,'Metacentric'],
+            'chr4': [727,190,'Submetacentric'],
+            'chr5': [839,181,'Submetacentric'],
+            'chr6': [996,170,'Submetacentric'],
+            'chr7': [862,159,'Submetacentric'],
+            'chr8': [646,145,'Submetacentric'],
+            'chr9': [739,138,'Submetacentric'],
+            'chr10': [706,133,'Submetacentric'],
+            'chr11': [1224,135,'Submetacentric'],
+            'chr12': [988,133,'Submetacentric'],
+            'chr13': [308,114,'Acrocentric'],
+            'chr14': [583,107,'Acrocentric'],
+            'chr15': [561,101,'Acrocentric'],
+            'chr16': [795,90,'Metacentric'],
+            'chr17': [1124,83,'Submetacentric'],
+            'chr18': [261,80,'Submetacentric'],
+            'chr19': [1357,58,'Metacentric'],
+            'chr20': [516,64,'Metacentric'],
+            'chr21': [215,46,'Acrocentric'],
+            'chr22': [417,50,'Acrocentric'],
+            'chrX': [804,156,'Submetacentric'],
+            'chrY': [63,57,'Acrocentric']}  
+    PlotChroScarse(chro_dict,'human chromosome genes distribution.pdf')
     
     end_time = process_time()
     print("from {0} to {1},consuming {2} seconds".format(start_time,end_time,end_time - start_time))

@@ -18,6 +18,7 @@ import regex
 import re
 from time import process_time
 import collections
+import backgroundGTEx as GTEx
 
 class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannually set __repr__ or __str__
     def __init__(self, df):
@@ -143,20 +144,24 @@ class NeoJ(Meta):
                 for peptide in peptides:
                     if peptide == '*': merArray.append('*')
                     else: 
-                        #print(merArray)
                         tempArray = extractNmer(peptide,9)
                         merArray.append(tempArray)
-                        #print(merArray)
-            print(merArray)
+            truthTable1 = [False if mer == '*' or mer == [] else True for mer in merArray]
+            if not any(truthTable1): merArray = ['Match but no translation or ealy stop, MANNUAL']
             col.append(merArray)
         self.df['9mer'] = col
+        
+    def getFinalMers(self):
+        col = []
+        for i in range(self.df.shape[0]):
+            uid, merArray = list(self.df['UID'])[i], list(self.df['9mer'])[i]
+            col.append(GTEx.merPassGTExCheck(dictGTEx,uid,merArray))
+        self.df['matchedFinalMer'] = col
                  
              
              
 def extractNmer(peptide,N):
-    print(peptide)
     starIndex = peptide.find('*')  
-    print(starIndex)
     merArray = []
     if starIndex == -1 and len(peptide) >= N:
         for i in range(0,len(peptide)-N+1,1):
@@ -164,13 +169,8 @@ def extractNmer(peptide,N):
             merArray.append(mer)
     if starIndex >= N:
         peptideTrun = peptide[:starIndex]
-        #print('I am here')
-        print(peptideTrun)
         for j in range(0,len(peptideTrun)-N+1,1):
-            print(j)
             mer = peptideTrun[j:j+N]
-            merArray.append(mer)
-    print(merArray)
     return merArray
                 
         
@@ -449,7 +449,24 @@ if __name__ == "__main__":
     NeoJBaml.phaseTranslateJunction()
     NeoJBaml.get9mer()
     
+    dictExonList = GTEx.convertExonList(df_exonlist)  
+    dictGTEx = GTEx.backgroundGTEx()
+    
+    NeoJBaml.getFinalMers()
+    
+    
     NeoJBaml.df.to_csv('NeoJunction.txt',sep='\t',header=True,index = False)
+#    
+#    def toFasta(list_):
+#    with open('queryNetMHC.fa','w') as file1:
+#        for index,item in enumerate(list_):
+#            file1.write('>{0} mer\n'.format(index+1))
+#            file1.write('{0}\n'.format(item.strip('\'')))
+#
+#
+#list1 = ['LRTSSSWEM', 'ILRTSSSWE', 'RTSSSWEMC', 'CMWILRTSS', 'MWILRTSSS', 'SCMWILRTS', 'WILRTSSSW']
+#list2 = ['WLHKIGLVV', 'HIAVGQQMN', 'QQMNLHWLH', 'VGQQMNLHW', 'HKIGLVVIL', 'ALCHIAVGQ', 'LALCHIAVG', 'AVGQQMNLH', 'VLALCHIAV', 'IGLVVILAS', 'GQQMNLHWL', 'VVILASTVV', 'LCHIAVGQQ', 'CHIAVGQQM', 'VILASTVVA', 'NLHWLHKIG', 'MNLHWLHKI', 'HWLHKIGLV', 'ILASTVVAM', 'KIGLVVILA', 'LHWLHKIGL', 'QMNLHWLHK', 'LVVILASTV', 'IAVGQQMNL', 'GLVVILAST', 'LHKIGLVVI']
+#list3 = list1 + list2
     
     
     

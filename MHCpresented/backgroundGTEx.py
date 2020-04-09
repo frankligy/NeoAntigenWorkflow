@@ -5,9 +5,10 @@ Created on Mon Apr  6 14:40:56 2020
 
 @author: ligk2e
 """
-import os
-os.chdir('/Users/ligk2e/Desktop/project/')
+import pandas as pd
 import pickle
+import os
+
 
 def backgroundGTEx():
     '''
@@ -77,10 +78,42 @@ def convertExonList(df):
         exonList = df.iat[i,3]
         try: dictExonList[EnsGID][EnsTID] = exonList
         except KeyError: dictExonList[EnsGID] = {EnsTID:exonList}
+        # {EnsGID:{EnsTID:exonlist,EnsTID:exonlist}}
     return dictExonList
+    
 
 
+def merPassGTExCheck(dictGTEx,uid,merArray):
+    EnsGID = uid.split('|')[0].split(':')[1]
+    splicingEvent = uid.split('|')[0].split(':')[2:]  # E12.3-E13.4 # E12.4_48334893-E23.4  # E12.4-ENSG00000898765:E3.4
+    normalMer = dictGTEx[EnsGID][1]['wholeMerArrayNormal']
+    arrangedNormal = flattenNestedList(normalMer,1)
+    arrangedSplicing = flattenNestedList(merArray,1,True)
+    uniqueInSplicing = list(arrangedSplicing - arrangedNormal)
+    return uniqueInSplicing
+    
+    
+    
+    
 
+    
+    
+    
+def flattenNestedList(list_,mode=0,clean=False): # mode = 0 means returning flatten list, mode = 1 means converting to set, mode = 2 means converting to list(set())
+    flatten = []
+    if not clean:
+        for sublist in list_:
+            flatten = [item for item in sublist]
+        if mode == 0: return flatten
+        elif mode == 1: return set(flatten)
+        elif mode == 2: return list(set(flatten))
+    elif clean:   # clean will remove '*',[],'MANNUAL'
+        for sublist in list_:
+            if isinstance(sublist,list) and sublist:  # if the sub is a non-empty list
+                flatten = [item for item in sublist]
+        if mode == 0: return flatten
+        elif mode == 1: return set(flatten)
+        elif mode == 2: return list(set(flatten))
 
 
 
@@ -120,7 +153,8 @@ def getNmerNormal(EnsID,EnsTID):
             
 if __name__ == "__main__":
     dictExonList = convertExonList(df_exonlist)  
-    dictGTEx = backgroundGTEx()          
+    dictGTEx = backgroundGTEx()      
+    merArray = ['*', ['SCMWILRTS', 'CMWILRTSS', 'MWILRTSSS', 'WILRTSSSW', 'ILRTSSSWE', 'LRTSSSWEM', 'RTSSSWEMC'], ['SCMWILRTS', 'CMWILRTSS', 'MWILRTSSS', 'WILRTSSSW', 'ILRTSSSWE', 'LRTSSSWEM', 'RTSSSWEMC'], ['SCMWILRTS', 'CMWILRTSS', 'MWILRTSSS', 'WILRTSSSW', 'ILRTSSSWE', 'LRTSSSWEM', 'RTSSSWEMC']]    
     
         
     

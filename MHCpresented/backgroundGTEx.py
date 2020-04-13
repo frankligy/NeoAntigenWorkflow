@@ -83,9 +83,8 @@ def convertExonList(df):
     
 
 
-def merPassGTExCheck(dictGTEx,uid,merArray):
+def merPassGTExCheck(dictGTEx,uid,merArray):   # pass nested list [[],[],[]]
     EnsGID = uid.split('|')[0].split(':')[1]
-    splicingEvent = uid.split('|')[0].split(':')[2:]  # E12.3-E13.4 # E12.4_48334893-E23.4  # E12.4-ENSG00000898765:E3.4
     normalMer = dictGTEx[EnsGID][1]['wholeMerArrayNormal']
     arrangedNormal = flattenNestedList(normalMer,1)
     arrangedSplicing = flattenNestedList(merArray,1,True)
@@ -100,6 +99,7 @@ def merPassGTExCheck(dictGTEx,uid,merArray):
     
     
 def flattenNestedList(list_,mode=0,clean=False): # mode = 0 means returning flatten list, mode = 1 means converting to set, mode = 2 means converting to list(set())
+    # input a nested list, only extract element from non-empty sub list.
     flatten = []
     if not clean:
         for sublist in list_:
@@ -114,6 +114,7 @@ def flattenNestedList(list_,mode=0,clean=False): # mode = 0 means returning flat
         if mode == 0: return flatten
         elif mode == 1: return set(flatten)
         elif mode == 2: return list(set(flatten))
+            
 
 
 

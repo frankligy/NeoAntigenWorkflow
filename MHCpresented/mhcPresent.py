@@ -19,6 +19,7 @@ import re
 from time import process_time
 import collections
 import backgroundGTEx as GTEx
+import intronRetention as IR
 
 class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannually set __repr__ or __str__
     def __init__(self, df):
@@ -36,10 +37,12 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
             back_site = list(temp.values())[0][1]
             exam_site_1 = subexon_tran(exam_site.split('-')[0],EnsID,dict_exonCoords,dict_fa,'site1')
             exam_site_2 = subexon_tran(exam_site.split('-')[1],EnsID,dict_exonCoords,dict_fa,'site2')
-            exam_seq.append(exam_site_1 + exam_site_2)
+            exam_seq_join = ','.join([exam_site_1,exam_site_2])
+            exam_seq.append(exam_seq_join)
             back_site_1 = subexon_tran(back_site.split('-')[0],EnsID,dict_exonCoords,dict_fa,'site1')
             back_site_2 = subexon_tran(back_site.split('-')[1],EnsID,dict_exonCoords,dict_fa,'site2')
-            back_seq.append(back_site_1 + back_site_2)
+            back_seq_join = ','.join([back_site_1,back_site_2])
+            back_seq.append(back_seq_join)
             
         self.df['exam_seq'] = exam_seq
         self.df['back_seq'] = back_seq
@@ -96,16 +99,16 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
 
 class NeoJ(Meta):   
     def __init__(self,df):
-        self.df=df
+        super().__init__(df)   # super() means Meta
 
     def phaseTranslateJunction(self):
         col0,col1 = [],[]
         for i in range(self.df.shape[0]):
             wholeTrans = list(self.df['exam_whole_transcripts'])[i]
             ORFtrans = list(self.df['exam_ORF_tran'])[i]
-            junction = list(self.df['exam_seq'])[i]
+            junction = list(self.df['exam_seq'])[i].replace(',','')
             phaseArray,peptideArray = [],[]
-            if not wholeTrans: 
+            if not wholeTrans:             # the EnsGID doesn't exist in mRNA-exon file
                 phaseArray.append('#')
                 peptideArray.append('#')
                 print('This gene {0} is absent in mRNA-ExonID file\n'.format(list(self.df['UID'])[i]))
@@ -158,10 +161,92 @@ class NeoJ(Meta):
             col.append(GTEx.merPassGTExCheck(dictGTEx,uid,merArray))
         self.df['matchedFinalMer'] = col
                  
-             
+    def mannual(self):
+        col = []
+        for i in range(self.df.shape[0]):
+            merArray = []
+            uid,junction,mer9 = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['9mer'].tolist()[i]
+            if mer9 == ['MANNUAL']: 
+                EnsGID = uid.split('|')[0].split(':')[1]
+                x = uid.split('|')
+                try: x[0].split(':')[3]   # these try-excepts aim to consider fusion gene situation
+                except IndexError: event = x[0].split(':')[2]
+                else: event = str(x[0].split(':')[2])+':'+str(x[0].split(':')[3])                                        
+                if re.search(r'I.+_\d+',event) or 'U' in event:  # they belong to NewExon type: including UTR type and blank type(the annotation is blank)
+                # for NewExon type, no need to infer translation phase, just use junction sequence, mer should span junction site
+                    junctionIndex = junction.find(',')
+                    junctionSlice = junction[junctionIndex-26:junctionIndex+27].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
+                    merTumor = dna2aa2mer(junctionSlice)   # merTumor is a nested list
+                    merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
+                if re.search(r'E\d+\.\d+_\d+',event) or 'ENSG' in event:  # they belong to newSplicing site or fusion gene
+                # for this type, just check if the former part (E1.2-E3.4, here E1.2 is former part) exist in known transcript, then infer the phase of translation
+                    merTumor = newSplicingSite(event,EnsGID,junction)   # nested list
+                    merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
+                    if merArray == []: merArray = ['newSplicing or fusion gene, already checked, either not translated or be eliminated by background check']
+                if re.search(r'^I\d+\.\d+-',event) or re.search(r'-I\d+\.\d+$',event):
+                    merTumor = IR.intron(event,EnsGID,junction,dict_exonCoords,dictExonList)  # nested list
+                    merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
+                    if merArray == []: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
+            col.append(merArray)
+        self.df['mannual'] = col
+
+
+def newSplicingSite(event,EnsGID,junction):   # one stop solution for newSplicingSite type
+    partialJunction = junction.split(',')[0]
+    fullJunction = junction.replace(',','')
+    try: event.split('-')[0].split('_')[1]   # see if the former one has trailing part E1.2_8483494
+    except IndexError: former = event.split('-')[0]  # no trailing part, former part just E1.2
+    else: former = event.split('-')[0].split('_')[0]  # has trailing part, former part should get rid of trailing part
+    finally:
+        wholeTranscripts = core_match(df_exonlist,dict_exonCoords,EnsGID,former)
+        allORFs = [transcript2peptide(tran) for tran in wholeTranscripts]
+        phaseArray,peptideArray = getPhasePeptide(EnsGID,wholeTranscripts,allORFs,partialJunction,fullJunction)
+        merArray = [extractNmer(peptide,9) for peptide in peptideArray]   # nested list
+           
+    return merArray
+
+def getPhasePeptide(EnsGID,wholeTrans,ORFtrans,partialJunction,fullJunction):   # used in newSplicingSite situation
+    phaseArray,peptideArray = [],[]
+    if not wholeTrans:             # the EnsGID doesn't exist in mRNA-exon file
+        phaseArray.append('#')
+        peptideArray.append('#')
+        print('This gene {0} is absent in mRNA-ExonID file\n'.format(EnsGID))
+    for j in range(len(wholeTrans)):
+        if not wholeTrans[j]: pass   # splicing evnet can not match to this transcript
+        else:
+            startJun = wholeTrans[j].find(partialJunction[:-1]) # trim the right-most overhang for simplicity
+            endJun = startJun + len(partialJunction[:-1])
+            startORF = wholeTrans[j].find(ORFtrans[j])
+            endORF = startORF + len(ORFtrans[j])
+            if startJun > endORF or endJun < startORF:
+                phase = '*'  # means junction site will not be translated
+                peptide = '*'
+                phaseArray.append(phase)
+                peptideArray.append(phase)
+                print('The {}th transcript of {}, even though junction site\
+                could match with, but optimal ORF suggests that junction site will not be translated'.format(j,EnsGID))
+            else: 
+                phase = abs(startJun - startORF) % 3 # phase 0 means junction will translate in 0 base
+                peptide = str(Seq(fullJunction[phase:-1],generic_dna).translate(to_stop=False))
+                phaseArray.append(phase)
+                peptideArray.append(peptide)
+    return phaseArray,peptideArray
+
+                    
+def dna2aa2mer(dna):
+    manner1,manner2,manner3 = dna[0:],dna[1:],dna[2:]
+    merBucket = []
+    for manner in [manner1,manner2,manner3]:
+        aa = str(Seq(manner,generic_dna).translate(to_stop=False))
+        mer = extractNmer(aa,9)
+        merBucket.append(mer)
+    return merBucket # a nested list of 9mer
+              
+                
              
 def extractNmer(peptide,N):
-    starIndex = peptide.find('*')  
+    starIndex = peptide.find('*') 
+   # print(starIndex)
     merArray = []
     if starIndex == -1 and len(peptide) >= N:
         for i in range(0,len(peptide)-N+1,1):
@@ -169,14 +254,16 @@ def extractNmer(peptide,N):
             merArray.append(mer)
     if starIndex >= N:
         peptideTrun = peptide[:starIndex]
+        #print(peptideTrun)
         for j in range(0,len(peptideTrun)-N+1,1):
             mer = peptideTrun[j:j+N]
+            merArray.append(mer)
     return merArray
                 
         
         
 
-def transcript2peptide(cdna_sequence):
+def transcript2peptide(cdna_sequence):   # actually to ORF
     reading_manners = []
     reading_manners.append(cdna_sequence[0:])
     reading_manners.append(cdna_sequence[1:])
@@ -337,12 +424,16 @@ def uid(df, i):
     dict = {}
     gene = gene + ':' + uid.split('|')[1].split(':')[0] # slicing the ENSG in background event
     x = uid.split('|')
-    dict[gene] = [x[0].split(':')[2]]
+    try: x[0].split(':')[3]
+    except IndexError: event = x[0].split(':')[2]
+    else: event = str(x[0].split(':')[2])+':'+str(x[0].split(':')[3])
+    finally: dict[gene] = [event]
+    
     try: x[1].split(':')[2]
-    except IndexError: dict[gene].append(x[1].split(':')[1])
-    else: 
-        fusionExon = str(x[1].split(':')[1])+':'+str(x[1].split(':')[2])
-        dict[gene].append(fusionExon)
+    except IndexError: backEvent = x[1].split(':')[1]
+    else: backEvent = str(x[1].split(':')[1])+':'+str(x[1].split(':')[2])
+    finally: dict[gene].append(backEvent)
+
     #{'gene:ENSid':[E22-E33,E34-E56]}
     # if fusion gene: E22-ENSG:E31
     return dict
@@ -374,7 +465,8 @@ def subexon_tran(subexon,EnsID,dict_exonCoords,dict_fa,flag): # flag means if it
                 try:
                     attrs = dict_exonCoords[EnsID][subexon]
                 except KeyError:
-                    exon_seq = 'UUUUUUUUUUUUUUUUUUUUUUUU'   
+                    chrUTR,strandUTR = utrAttrs(EnsID,dict_exonCoords)
+                    exon_seq = utrJunction(suffix,EnsID,strandUTR,chrUTR,flag)  
                     print('{0} observes an UTR event {1}'.format(EnsID,subexon))
                 else:
                     if flag == 'site2':           
@@ -383,6 +475,47 @@ def subexon_tran(subexon,EnsID,dict_exonCoords,dict_fa,flag): # flag means if it
                         exon_seq = query_from_dict_fa(dict_fa,attrs[2],suffix,EnsID,attrs[1])
     return exon_seq
 
+def utrJunction(site,EnsGID,strand,chr_,flag):  # U0.1_438493849, here 438493849 means the site
+    if flag == 'site1' and strand == '+':  # U0.1_438493849 - E2.2
+        otherSite = int(site) - 100 + 1   # extract UTR with length = 100
+        exon_seq = query_from_dict_fa(dict_fa,otherSite,site,EnsGID,strand)
+    elif flag == 'site1' and strand == '-':
+        otherSite = int(site) + 100 - 1 
+        exon_seq = query_from_dict_fa(dict_fa,site,otherSite,EnsGID,strand)
+        if exon_seq == '': 
+            exon_seq = retrieveSeqFromUCSCapi(chr_,int(site),int(otherSite))
+    elif flag == 'site2' and strand == '+':  # E5.3 - U5.4_48374838
+        otherSite = int(site) + 100 -1
+        exon_seq = query_from_dict_fa(dict_fa,site,otherSite,EnsGID,strand)
+    elif flag == 'site2' and strand == '-':
+        otherSite = int(site) - 100 + 1
+        exon_seq = query_from_dict_fa(dict_fa,otherSite,site,EnsGID,strand)
+    return exon_seq
+
+def utrAttrs(EnsID,dict_exonCoords):
+    exonDict = dict_exonCoords[EnsID] 
+    attrs = next(iter(exonDict.values()))
+    chr_,strand = attrs[0],attrs[1]
+    return chr_,strand
+
+
+
+def retrieveSeqFromUCSCapi(chr_,start,end):
+    import requests
+    import xmltodict
+    url = 'http://genome.ucsc.edu/cgi-bin/das/hg38/dna?segment={0}:{1},{2}'.format(chr_,start,end)
+    response = requests.get(url)
+    status_code = response.status_code
+    assert status_code == 200
+    my_dict = xmltodict.parse(response.content)
+    exon_seq = my_dict['DASDNA']['SEQUENCE']['DNA']['#text'].replace('\n','').upper()
+    return exon_seq
+    
+    
+    
+    
+    
+    
 def fasta_to_dict(path):
     dict_fa = {}
     with open(path,'r') as in_handle:
@@ -453,20 +586,39 @@ if __name__ == "__main__":
     dictGTEx = GTEx.backgroundGTEx()
     
     NeoJBaml.getFinalMers()
+    NeoJBaml.mannual()
     
     
     NeoJBaml.df.to_csv('NeoJunction.txt',sep='\t',header=True,index = False)
-#    
-#    def toFasta(list_):
-#    with open('queryNetMHC.fa','w') as file1:
-#        for index,item in enumerate(list_):
-#            file1.write('>{0} mer\n'.format(index+1))
-#            file1.write('{0}\n'.format(item.strip('\'')))
-#
-#
-#list1 = ['LRTSSSWEM', 'ILRTSSSWE', 'RTSSSWEMC', 'CMWILRTSS', 'MWILRTSSS', 'SCMWILRTS', 'WILRTSSSW']
-#list2 = ['WLHKIGLVV', 'HIAVGQQMN', 'QQMNLHWLH', 'VGQQMNLHW', 'HKIGLVVIL', 'ALCHIAVGQ', 'LALCHIAVG', 'AVGQQMNLH', 'VLALCHIAV', 'IGLVVILAS', 'GQQMNLHWL', 'VVILASTVV', 'LCHIAVGQQ', 'CHIAVGQQM', 'VILASTVVA', 'NLHWLHKIG', 'MNLHWLHKI', 'HWLHKIGLV', 'ILASTVVAM', 'KIGLVVILA', 'LHWLHKIGL', 'QMNLHWLHK', 'LVVILASTV', 'IAVGQQMNL', 'GLVVILAST', 'LHKIGLVVI']
-#list3 = list1 + list2
+    
+    def toFasta(list_):
+        with open('queryNetMHC.fa','w') as file1:
+            for index,item in enumerate(list_):
+                file1.write('>{0} mer\n'.format(index+1))
+                file1.write('{0}\n'.format(item.strip('\'')))
+
+
+list1 = ['QSYLRMEQS', 'MEQSQPLGN', 'SYLRMEQSQ', 'RMEQSQPLG', 'LRMEQSQPL', 'YLRMEQSQP', 'EQSQPLGNK']
+list2 = ['HLDNTIQSV', 'HHLDNTIQS', 'DNTIQSVFC', 'KTHHLDNTI', 'LSKTHHLDN', 'SKTHHLDNT', 'THHLDNTIQ', 'LDNTIQSVF', 'HLSKTHHLD']
+list3 = ['RRVELLRSS', 'LLRSSGDIV', 'DRRVELLRS', 'VELLRSSGD', 'RVELLRSSG', 'ELLRSSGDI', 'LRSSGDIVM', 'GDRRVELLR', 'RSSGDIVMT']
+list4 = ['MWILRTSSS', 'LRTSSSWEM', 'SCMWILRTS', 'CMWILRTSS', 'RTSSSWEMC', 'ILRTSSSWE', 'WILRTSSSW']
+list5 = ['DNFLLTMVA', 'FLLTMVAEF', 'TMVAEFWRL', 'QDNFLLTMV', 'SGQDNFLLT', 'NFLLTMVAE', 'GQDNFLLTM', 'LLTMVAEFW', 'LTMVAEFWR']
+list6 = ['NLHWLHKIG', 'GLVVILAST', 'ALCHIAVGQ', 'HWLHKIGLV', 'LHWLHKIGL', 'KIGLVVILA', 'ILASTVVAM', 'QQMNLHWLH', 'LHKIGLVVI', 'HIAVGQQMN', 'LCHIAVGQQ', 'IAVGQQMNL', 'VVILASTVV', 'IGLVVILAS', 'AVGQQMNLH', 'GQQMNLHWL', 'QMNLHWLHK', 'WLHKIGLVV', 'HKIGLVVIL', 'VGQQMNLHW', 'VLALCHIAV', 'LALCHIAVG', 'MNLHWLHKI', 'CHIAVGQQM', 'VILASTVVA', 'LVVILASTV']
+list7 = ['DCSARMKSS', 'RGQLDCSAR', 'KTCLGLPRR', 'CLGLPRRGQ', 'LDCSARMKS', 'FILKTCLGL', 'GLPRRGQLD', 'RRGQLDCSA', 'PRRGQLDCS', 'LPRRGQLDC', 'RMKSSFTEK', 'QLDCSARMK', 'FTEKRGQYW', 'LKTCLGLPR', 'ILKTCLGLP', 'TCLGLPRRG', 'TEKRGQYWD', 'RNFILKTCL', 'SSFTEKRGQ', 'KRGQYWDHL', 'GQLDCSARM', 'MKSSFTEKR', 'SFTEKRGQY', 'CSARMKSSF', 'ARMKSSFTE', 'KSSFTEKRG', 'SARMKSSFT', 'EKRGQYWDH', 'LGLPRRGQL', 'NFILKTCLG']
+list8 = ['GSVGHGSPG', 'RRGSVGHGS', 'RGSVGHGSP', 'ERRGSVGHG', 'PERRGSVGH', 'VPERRGSVG', 'LVPERRGSV']
+list9 = ['SKLQESFQG', 'IGMGKILLG', 'GDVAVTQGR', 'ATVEASPPF', 'MGKILLGSG', 'VTIGGFAKL', 'KVTIGGFAK', 'GMGKILLGS', 'YWACAVDPA', 'QLQEPVGTK', 'PVGTKPERK', 'PLDCSGPVC', 'TIGGFAKLD', 'PRYDPDSGH', 'LTGRDGPTA', 'GASSNAGLT', 'ICLDYERGR', 'GRVSFLDAV', 'GLLECPLDC', 'GAPDVISPR', 'EASPPFAFL', 'LQEPVGTKP', 'VGVGLESKL', 'DYERGRVSF', 'SYLVKVGVG', 'AVSFRGLLE', 'CPLDCSGPV', 'LGSGASSNA', 'GPVCPAFCF', 'FCFIGGGAV', 'GHDSGAEDA', 'PAFCFIGGG', 'VEASPPFAF', 'SGHDSGAED', 'GPTAGCTVP', 'AEDATVEAS', 'GGAVQLQEP', 'CSGPVCPAF', 'DPASYLVKV', 'VQLQEPVGT', 'VGLESKLQE', 'APDVISPRY', 'QESFQGAPD', 'VKVGVGLES', 'PASYLVKVG', 'ESFQGAPDV', 'GRSYWACAV', 'GLTGRDGPT', 'DCSGPVCPA', 'SFLDAVSFR', 'GTKPERKVT', 'PDSGHDSGA', 'AGLTGRDGP', 'ISPRYDPDS', 'VSFLDAVSF', 'RGLLECPLD', 'VDPASYLVK', 'QGAPDVISP', 'NAGLTGRDG', 'CLDYERGRV', 'VGTKPERKV', 'PPRLGICLD', 'RSYWACAVD', 'YLVKVGVGL', 'ECPLDCSGP', 'ERKVTIGGF', 'YERGRVSFL', 'RGRVSFLDA', 'QEPVGTKPE', 'ILLGSGASS', 'AVQLQEPVG', 'CPAFCFIGG', 'ACAVDPASY', 'ASYLVKVGV', 'LPPRLGICL', 'TIGMGKILL', 'GICLDYERG', 'SYWACAVDP', 'LQESFQGAP', 'PDVISPRYD', 'GAEDATVEA', 'GVGLESKLQ', 'DATVEASPP', 'SPRYDPDSG', 'LVKVGVGLE', 'VAVTQGRSY', 'LESKLQESF', 'FLTIGMGKI', 'PLPPRLGIC', 'DVISPRYDP', 'LDCSGPVCP', 'LDYERGRVS', 'ERGRVSFLD', 'DAVSFRGLL', 'AGCTVPLPP', 'SGAEDATVE', 'RLGICLDYE', 'GAVQLQEPV', 'LLECPLDCS', 'AFCFIGGGA', 'FAFLTIGMG', 'SFRGLLECP', 'TVEASPPFA', 'QGRSYWACA', 'LECPLDCSG', 'ASSNAGLTG', 'RYDPDSGHD', 'GGGAVQLQE', 'SPPFAFLTI', 'AFLTIGMGK', 'SSNAGLTGR', 'DVAVTQGRS', 'SFQGAPDVI', 'GRDGPTAGC', 'PERKVTIGG', 'GSGASSNAG', 'DGPTAGCTV', 'DSGAEDATV', 'WACAVDPAS', 'VISPRYDPD', 'LLGSGASSN', 'SNAGLTGRD', 'PPFAFLTIG', 'VSFRGLLEC', 'DPDSGHDSG', 'GCTVPLPPR', 'TQGRSYWAC', 'FLDAVSFRG', 'VCPAFCFIG', 'RVSFLDAVS', 'PRLGICLDY', 'PVCPAFCFI', 'IGGGAVQLQ', 'YDPDSGHDS', 'EDATVEASP', 'CTVPLPPRL', 'PFAFLTIGM', 'KILLGSGAS', 'PTAGCTVPL', 'GLESKLQES', 'ESKLQESFQ', 'TKPERKVTI', 'GKILLGSGA', 'TGRDGPTAG', 'KLQESFQGA', 'KVGVGLESK', 'SGASSNAGL', 'ASPPFAFLT', 'TVPLPPRLG', 'HDSGAEDAT', 'AVDPASYLV', 'VTQGRSYWA', 'LTIGMGKIL', 'EPVGTKPER', 'KPERKVTIG', 'FQGAPDVIS', 'FIGGGAVQL', 'AVTQGRSYW', 'LDAVSFRGL', 'FRGLLECPL', 'LGICLDYER', 'CAVDPASYL', 'SGPVCPAFC', 'RDGPTAGCT', 'VPLPPRLGI', 'CFIGGGAVQ', 'TAGCTVPLP', 'RKVTIGGFA', 'DSGHDSGAE']
+list10 = ['TISSFFLNS', 'EGAFVYLFL', 'VTEGAFVYL', 'TEGAFVYLF', 'LNSVTEGAF', 'SVTEGAFVY', 'SSFFLNSVT', 'ISSFFLNSV', 'FTHTISSFF', 'HTISSFFLN', 'NSVTEGAFV', 'SFTHTISSF', 'THTISSFFL', 'FLNSVTEGA', 'AFVYLFLGN', 'YLFLGNLLR', 'SFFLNSVTE', 'GESFTHTIS', 'AAGESFTHT', 'VYLFLGNLL', 'AGESFTHTI', 'GAFVYLFLG', 'FVYLFLGNL', 'ESFTHTISS', 'LFLGNLLRH', 'FFLNSVTEG']
+list11 = ['SGATRPYLP', 'GPQWLLRTD', 'CCPECPSGA', 'PYLPGPQWL', 'VPCCPECPS', 'PSGATRPYL', 'GATRPYLPG', 'CPECPSGAT', 'TRPYLPGPQ', 'GLVPCCPEC', 'LVPCCPECP', 'RPYLPGPQW', 'PRELGLVPC', 'PECPSGATR', 'LGLVPCCPE', 'ELGLVPCCP', 'ECPSGATRP', 'ATRPYLPGP', 'YLPGPQWLL', 'PGPQWLLRT', 'PCCPECPSG', 'RELGLVPCC', 'LPGPQWLLR', 'CPSGATRPY']
+list12 = ['QTPTVYALP', 'PLDWEQTPT', 'WEQTPTVYA', 'RGSGLEATG', 'NLKPRGSGL', 'ATGGLSDPW', 'SLVLQPEPL', 'EATGGLSDP', 'PRGSGLEAT', 'NSDTNLKPR', 'PTVYALPSP', 'GLSDPWASC', 'GGLSDPWAS', 'CQSLVLQPE', 'DWEQTPTVY', 'PWASCQSLV', 'DPWASCQSL', 'LKPRGSGLE', 'SGLEATGGL', 'LEATGGLSD', 'LVLQPEPLD', 'QSLVLQPEP', 'EPLDWEQTP', 'EQTPTVYAL', 'GSGLEATGG', 'GLEATGGLS', 'LQPEPLDWE', 'SDTNLKPRG', 'WASCQSLVL', 'DTNLKPRGS', 'LDWEQTPTV', 'TGGLSDPWA', 'TNLKPRGSG', 'VLQPEPLDW', 'YALPSPVPT', 'TVYALPSPV', 'TPTVYALPS', 'QPEPLDWEQ', 'ASCQSLVLQ', 'KPRGSGLEA', 'SDPWASCQS', 'LSDPWASCQ', 'SCQSLVLQP', 'VYALPSPVP', 'PEPLDWEQT']
+list13 = ['HNRYSGAWA', 'AAKQLHNRY', 'QLHNRYSGA', 'RYSGAWAPR', 'LHNRYSGAW', 'KQLHNRYSG', 'SGAWAPRGA', 'AWAPRGAGT', 'APRGAGTSW', 'QAAKQLHNR', 'WAPRGAGTS', 'YSGAWAPRG', 'PRGAGTSWM', 'GAWAPRGAG', 'NRYSGAWAP', 'AKQLHNRYS']
+list14 = ['SLLLAQGSA', 'GSFLLPTPQ', 'LPHPSAPGS', 'GSALGEETL', 'LGEETLPHP', 'QSLRSCTNR', 'SLRSCTNRP', 'LLAQGSALG', 'RSCTNRPSI', 'GFSLFSALF', 'ETLPHPSAP', 'LFFRFIFSL', 'LLLAQGSAL', 'ISFGFSLFS', 'SGSFLLPTP', 'SFLLPTPQS', 'LAQGSALGE', 'CTNRPSISF', 'TNRPSISFG', 'CDGSLLLAQ', 'AQGSALGEE', 'GSLLLAQGS', 'QSQSLRSCT', 'FGFSLFSAL', 'ALFFRFIFS', 'PSAPGSGSF', 'PHPSAPGSG', 'SQSLRSCTN', 'LLPTPQSQS', 'GCDGSLLLA', 'SFGFSLFSA', 'EETLPHPSA', 'APGSGSFLL', 'SAPGSGSFL', 'SCTNRPSIS', 'FLLPTPQSQ', 'DGSLLLAQG', 'PSISFGFSL', 'QGSALGEET', 'GEETLPHPS', 'GSGSFLLPT', 'PQSQSLRSC', 'SALGEETLP', 'HPSAPGSGS', 'RPSISFGFS', 'SLFSALFFR', 'TPQSQSLRS', 'ALGEETLPH', 'SALFFRFIF', 'FSALFFRFI', 'LRSCTNRPS', 'PGSGSFLLP', 'PTPQSQSLR', 'LPTPQSQSL', 'FSLFSALFF', 'TLPHPSAPG', 'SISFGFSLF', 'NRPSISFGF', 'LFSALFFRF']
+
+
+list_ = []
+for i in range(12,15):
+    list_ += eval('list{0}'.format(i))
+print(len(list_))
+toFasta(list_)
     
     
     

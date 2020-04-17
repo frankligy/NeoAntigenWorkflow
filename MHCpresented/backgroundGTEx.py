@@ -10,7 +10,7 @@ import pickle
 import os
 
 
-def backgroundGTEx():
+def backgroundGTEx(N):
     '''
     Run following command in your terminal, get sampleType.txt, wholeBloodID,allsampleID.txt
     
@@ -57,7 +57,7 @@ def backgroundGTEx():
             mean = tranTPMsim.iat[i,2]
             if mean > 0.3: highExpression = True
             else: highExpression = False
-            if highExpression: merArrayNormal = getNmerNormal(EnsGID,EnsTID)  # merArrayNormal is all 9mer for each transcript that expresses in normal tissue
+            if highExpression: merArrayNormal = getNmerNormal(EnsGID,EnsTID,N)  # merArrayNormal is all 9mer for each transcript that expresses in normal tissue
             try: 
                 dictGTEx[EnsGID][0][EnsTID] = highExpression
                 try: merArrayNormal   
@@ -120,7 +120,7 @@ def flattenNestedList(list_,mode=0,clean=False): # mode = 0 means returning flat
 
 
            
-def getNmerNormal(EnsID,EnsTID):
+def getNmerNormal(EnsID,EnsTID,N):
     try:exonlist = dictExonList[EnsID][EnsTID] 
     except KeyError: print('{0} of {1} doesn\'t exist in mRNA-ExonID file'.format(EnsTID,EnsID))                             
     # obtain the full-length sequence for this exonlist to check its resultant 9mer
@@ -147,7 +147,7 @@ def getNmerNormal(EnsID,EnsTID):
         # continue to get ORF
         ORF = transcript2peptide(full_transcript)
         peptide = str(Seq(ORF,generic_dna).translate(to_stop=False))
-        merArray = extractNmer(peptide,9)  # all the 9mer the normal
+        merArray = extractNmer(peptide,N)  # all the 9mer the normal
         return merArray   # ['SRTTIFDFJD','FJDJFKDJFKDJ','FJKDFJKDF']
    
   

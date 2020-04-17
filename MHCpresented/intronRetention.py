@@ -17,7 +17,7 @@ from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
 from urllib.error import HTTPError
 
-def intron(event,EnsGID,junction,dict_exonCoords,dictExonList):
+def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
     merBucket = []
     if event.startswith('E'):   # only consider this situation, since intron retentions are predominantly associated with a translatable preceding exon, ending up with a early stop codon
         # namely: E2.4-I2.1, E22.1-I22.1
@@ -37,18 +37,18 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList):
                             # if 0, means the first nt in intron will be the first nt in codon triplet,
                             # if 1, means the first nt in intron will be the second nt in codon triplet,
                             # if 2, means the first nt in intron will be the third nt in codon triplet.
-                            if remainder == 0: junctionSlice = junction[junction.find(',') - 24:].replace(',','')
-                            elif remainder == 1: junctionSlice = junction[junction.find(',') - 25:].replace(',','')
-                            elif remainder == 2: junctionSlice = junction[junction.find(',') - 26:].replace(',','')
+                            if remainder == 0: junctionSlice = junction[junction.find(',') - (N*3):].replace(',','')
+                            elif remainder == 1: junctionSlice = junction[junction.find(',') - (N*3+1):].replace(',','')
+                            elif remainder == 2: junctionSlice = junction[junction.find(',') - (N*3+2):].replace(',','')
                         elif strand == '-':
                             intronStartIndex = int(attrs[3]) - 1
                             remainder = (tranStartIndex - intronStartIndex) % 3 
-                            if remainder == 0: junctionSlice = junction[junction.find(',') + 24:].replace(',','')
-                            elif remainder == 1: junctionSlice = junction[junction.find(',') + 25:].replace(',','')
-                            elif remainder == 2: junctionSlice = junction[junction.find(',') + 26:].replace(',','')
+                            if remainder == 0: junctionSlice = junction[junction.find(',') + (N*3):].replace(',','')
+                            elif remainder == 1: junctionSlice = junction[junction.find(',') + (N*3+1):].replace(',','')
+                            elif remainder == 2: junctionSlice = junction[junction.find(',') + (N*3+2):].replace(',','')
                 
                         peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                        merArray = extractNmer(peptide,9) 
+                        merArray = extractNmer(peptide,N) 
                         merBucket.append(merArray)
         if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
         

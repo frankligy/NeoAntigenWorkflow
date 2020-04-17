@@ -98,8 +98,9 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
             
 
 class NeoJ(Meta):   
-    def __init__(self,df):
+    def __init__(self,df,N):
         super().__init__(df)   # super() means Meta
+        self.mer = N    # length of mer that we are aiming to get
 
     def phaseTranslateJunction(self):
         col0,col1 = [],[]
@@ -137,7 +138,7 @@ class NeoJ(Meta):
         self.df['phase'] = col0
         self.df['peptide'] = col1
                 
-    def get9mer(self):
+    def getNmer(self):
         col = []
         for i in range(self.df.shape[0]):
             peptides = list(self.df['peptide'])[i]
@@ -147,17 +148,17 @@ class NeoJ(Meta):
                 for peptide in peptides:
                     if peptide == '*': merArray.append('*')
                     else: 
-                        tempArray = extractNmer(peptide,9)
+                        tempArray = extractNmer(peptide,self.mer)
                         merArray.append(tempArray)
             truthTable1 = [False if mer == '*' or mer == [] else True for mer in merArray]
             if not any(truthTable1): merArray = ['Match but no translation or ealy stop, MANNUAL']
             col.append(merArray)
-        self.df['9mer'] = col
+        self.df['{0}mer'.format(self.mer)] = col
         
     def getFinalMers(self):
         col = []
         for i in range(self.df.shape[0]):
-            uid, merArray = list(self.df['UID'])[i], list(self.df['9mer'])[i]
+            uid, merArray = list(self.df['UID'])[i], list(self.df['{0}mer'.format(self.mer)])[i]
             col.append(GTEx.merPassGTExCheck(dictGTEx,uid,merArray))
         self.df['matchedFinalMer'] = col
                  
@@ -165,7 +166,7 @@ class NeoJ(Meta):
         col = []
         for i in range(self.df.shape[0]):
             merArray = []
-            uid,junction,mer9 = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['9mer'].tolist()[i]
+            uid,junction,mer9 = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['{0}mer'.format(self.mer)].tolist()[i]
             if mer9 == ['MANNUAL']: 
                 EnsGID = uid.split('|')[0].split(':')[1]
                 x = uid.split('|')
@@ -175,23 +176,33 @@ class NeoJ(Meta):
                 if re.search(r'I.+_\d+',event) or 'U' in event:  # they belong to NewExon type: including UTR type and blank type(the annotation is blank)
                 # for NewExon type, no need to infer translation phase, just use junction sequence, mer should span junction site
                     junctionIndex = junction.find(',')
-                    junctionSlice = junction[junctionIndex-26:junctionIndex+27].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
-                    merTumor = dna2aa2mer(junctionSlice)   # merTumor is a nested list
+                    junctionSlice = junction[junctionIndex-((self.mer*3)-1):junctionIndex+(self.mer*3)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
+                    merTumor = dna2aa2mer(junctionSlice,self.mer)   # merTumor is a nested list
                     merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
                 if re.search(r'E\d+\.\d+_\d+',event) or 'ENSG' in event:  # they belong to newSplicing site or fusion gene
                 # for this type, just check if the former part (E1.2-E3.4, here E1.2 is former part) exist in known transcript, then infer the phase of translation
-                    merTumor = newSplicingSite(event,EnsGID,junction)   # nested list
+                    merTumor = newSplicingSite(event,EnsGID,junction,self.mer)   # nested list
                     merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray == []: merArray = ['newSplicing or fusion gene, already checked, either not translated or be eliminated by background check']
                 if re.search(r'^I\d+\.\d+-',event) or re.search(r'-I\d+\.\d+$',event):
-                    merTumor = IR.intron(event,EnsGID,junction,dict_exonCoords,dictExonList)  # nested list
+                    merTumor = IR.intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
                     merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray == []: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
             col.append(merArray)
         self.df['mannual'] = col
+        
+    def collectNeoAntigen(self):
+        list_ = []
+        known,novel = self.df['matchedFinalMer'].tolist(),self.df['mannual'].tolist()
+        whole = known+novel
+        filterBucket = [[],['newSplicing or fusion gene, already checked, either not translated or be eliminated by background check'],['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']]
+        for i in whole:
+            if not i in filterBucket: list_ += i
+        self.mhcNeoAntigens = list(set(list_))
+        
 
 
-def newSplicingSite(event,EnsGID,junction):   # one stop solution for newSplicingSite type
+def newSplicingSite(event,EnsGID,junction,N):   # one stop solution for newSplicingSite type
     partialJunction = junction.split(',')[0]
     fullJunction = junction.replace(',','')
     try: event.split('-')[0].split('_')[1]   # see if the former one has trailing part E1.2_8483494
@@ -201,7 +212,7 @@ def newSplicingSite(event,EnsGID,junction):   # one stop solution for newSplicin
         wholeTranscripts = core_match(df_exonlist,dict_exonCoords,EnsGID,former)
         allORFs = [transcript2peptide(tran) for tran in wholeTranscripts]
         phaseArray,peptideArray = getPhasePeptide(EnsGID,wholeTranscripts,allORFs,partialJunction,fullJunction)
-        merArray = [extractNmer(peptide,9) for peptide in peptideArray]   # nested list
+        merArray = [extractNmer(peptide,N) for peptide in peptideArray]   # nested list
            
     return merArray
 
@@ -233,13 +244,19 @@ def getPhasePeptide(EnsGID,wholeTrans,ORFtrans,partialJunction,fullJunction):   
     return phaseArray,peptideArray
 
                     
-def dna2aa2mer(dna):
+def dna2aa2mer(dna,N):
     manner1,manner2,manner3 = dna[0:],dna[1:],dna[2:]
     merBucket = []
     for manner in [manner1,manner2,manner3]:
-        aa = str(Seq(manner,generic_dna).translate(to_stop=False))
-        mer = extractNmer(aa,9)
-        merBucket.append(mer)
+        #print(manner)
+        try:
+            aa = str(Seq(manner,generic_dna).translate(to_stop=False))
+        except: 
+            print('There are *** in the junction site, previous bugs')
+        else:    
+            mer = extractNmer(aa,N)
+            merBucket.append(mer)
+    if merBucket == []: merBucket = [[]]
     return merBucket # a nested list of 9mer
               
                 
@@ -566,59 +583,71 @@ def exonCoords_to_dict(path,delimiter):
     # final structure {'EnsID':{E1:[chr,strand,start,end],E2:[chr,strand,start,end]}}
     return dict_exonCoords
 
+
+def toFasta(list_,N):
+    with open('./resultMHC/queryNetMHC_{0}.fa'.format(N),'w') as file1:
+        for index,item in enumerate(list_):
+            file1.write('>{0} mer\n'.format(index+1))
+            file1.write('{0}\n'.format(item.strip('\'')))
+
+
 if __name__ == "__main__":
     # load necessary input files
+    from time import process_time
+    startTime = process_time()
     df = pd.read_csv('PSI.AML__U2AF1-CV_vs_Healthy__U2AF1-CV.txt',sep='\t') 
     df_exonlist = pd.read_csv('mRNA-ExonIDs.txt',sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
     dict_exonCoords = exonCoords_to_dict('Hs_Ensembl_exon.txt','\t')
     dict_fa = fasta_to_dict('Hs_gene-seq-2000_flank.fa')
     metaBaml = Meta(df) #Instantiate Meta object
     dfNeoJunction = neoJunctions(metaBaml.df)
-    NeoJBaml = NeoJ(dfNeoJunction) #Instantiate NeoJ object
+    NeoJBaml = NeoJ(dfNeoJunction,11) #Instantiate NeoJ object
     NeoJBaml.retrieveJunctionSite()
     NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
     NeoJBaml.getORF()
     NeoJBaml.getORFaa()
     NeoJBaml.phaseTranslateJunction()
-    NeoJBaml.get9mer()
+    NeoJBaml.getNmer()
     
     dictExonList = GTEx.convertExonList(df_exonlist)  
-    dictGTEx = GTEx.backgroundGTEx()
+    dictGTEx = GTEx.backgroundGTEx(NeoJBaml.mer)
     
     NeoJBaml.getFinalMers()
     NeoJBaml.mannual()
+    NeoJBaml.collectNeoAntigen()
+    toFasta(NeoJBaml.mhcNeoAntigens,NeoJBaml.mer)
     
     
-    NeoJBaml.df.to_csv('NeoJunction.txt',sep='\t',header=True,index = False)
+    NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)
     
-    def toFasta(list_):
-        with open('queryNetMHC.fa','w') as file1:
-            for index,item in enumerate(list_):
-                file1.write('>{0} mer\n'.format(index+1))
-                file1.write('{0}\n'.format(item.strip('\'')))
+    endTime = process_time()
+    print('Time Usage: {} seconds'.format(endTime-startTime))
+    print(len(NeoJBaml.mhcNeoAntigens))
+    
 
 
-list1 = ['QSYLRMEQS', 'MEQSQPLGN', 'SYLRMEQSQ', 'RMEQSQPLG', 'LRMEQSQPL', 'YLRMEQSQP', 'EQSQPLGNK']
-list2 = ['HLDNTIQSV', 'HHLDNTIQS', 'DNTIQSVFC', 'KTHHLDNTI', 'LSKTHHLDN', 'SKTHHLDNT', 'THHLDNTIQ', 'LDNTIQSVF', 'HLSKTHHLD']
-list3 = ['RRVELLRSS', 'LLRSSGDIV', 'DRRVELLRS', 'VELLRSSGD', 'RVELLRSSG', 'ELLRSSGDI', 'LRSSGDIVM', 'GDRRVELLR', 'RSSGDIVMT']
-list4 = ['MWILRTSSS', 'LRTSSSWEM', 'SCMWILRTS', 'CMWILRTSS', 'RTSSSWEMC', 'ILRTSSSWE', 'WILRTSSSW']
-list5 = ['DNFLLTMVA', 'FLLTMVAEF', 'TMVAEFWRL', 'QDNFLLTMV', 'SGQDNFLLT', 'NFLLTMVAE', 'GQDNFLLTM', 'LLTMVAEFW', 'LTMVAEFWR']
-list6 = ['NLHWLHKIG', 'GLVVILAST', 'ALCHIAVGQ', 'HWLHKIGLV', 'LHWLHKIGL', 'KIGLVVILA', 'ILASTVVAM', 'QQMNLHWLH', 'LHKIGLVVI', 'HIAVGQQMN', 'LCHIAVGQQ', 'IAVGQQMNL', 'VVILASTVV', 'IGLVVILAS', 'AVGQQMNLH', 'GQQMNLHWL', 'QMNLHWLHK', 'WLHKIGLVV', 'HKIGLVVIL', 'VGQQMNLHW', 'VLALCHIAV', 'LALCHIAVG', 'MNLHWLHKI', 'CHIAVGQQM', 'VILASTVVA', 'LVVILASTV']
-list7 = ['DCSARMKSS', 'RGQLDCSAR', 'KTCLGLPRR', 'CLGLPRRGQ', 'LDCSARMKS', 'FILKTCLGL', 'GLPRRGQLD', 'RRGQLDCSA', 'PRRGQLDCS', 'LPRRGQLDC', 'RMKSSFTEK', 'QLDCSARMK', 'FTEKRGQYW', 'LKTCLGLPR', 'ILKTCLGLP', 'TCLGLPRRG', 'TEKRGQYWD', 'RNFILKTCL', 'SSFTEKRGQ', 'KRGQYWDHL', 'GQLDCSARM', 'MKSSFTEKR', 'SFTEKRGQY', 'CSARMKSSF', 'ARMKSSFTE', 'KSSFTEKRG', 'SARMKSSFT', 'EKRGQYWDH', 'LGLPRRGQL', 'NFILKTCLG']
-list8 = ['GSVGHGSPG', 'RRGSVGHGS', 'RGSVGHGSP', 'ERRGSVGHG', 'PERRGSVGH', 'VPERRGSVG', 'LVPERRGSV']
-list9 = ['SKLQESFQG', 'IGMGKILLG', 'GDVAVTQGR', 'ATVEASPPF', 'MGKILLGSG', 'VTIGGFAKL', 'KVTIGGFAK', 'GMGKILLGS', 'YWACAVDPA', 'QLQEPVGTK', 'PVGTKPERK', 'PLDCSGPVC', 'TIGGFAKLD', 'PRYDPDSGH', 'LTGRDGPTA', 'GASSNAGLT', 'ICLDYERGR', 'GRVSFLDAV', 'GLLECPLDC', 'GAPDVISPR', 'EASPPFAFL', 'LQEPVGTKP', 'VGVGLESKL', 'DYERGRVSF', 'SYLVKVGVG', 'AVSFRGLLE', 'CPLDCSGPV', 'LGSGASSNA', 'GPVCPAFCF', 'FCFIGGGAV', 'GHDSGAEDA', 'PAFCFIGGG', 'VEASPPFAF', 'SGHDSGAED', 'GPTAGCTVP', 'AEDATVEAS', 'GGAVQLQEP', 'CSGPVCPAF', 'DPASYLVKV', 'VQLQEPVGT', 'VGLESKLQE', 'APDVISPRY', 'QESFQGAPD', 'VKVGVGLES', 'PASYLVKVG', 'ESFQGAPDV', 'GRSYWACAV', 'GLTGRDGPT', 'DCSGPVCPA', 'SFLDAVSFR', 'GTKPERKVT', 'PDSGHDSGA', 'AGLTGRDGP', 'ISPRYDPDS', 'VSFLDAVSF', 'RGLLECPLD', 'VDPASYLVK', 'QGAPDVISP', 'NAGLTGRDG', 'CLDYERGRV', 'VGTKPERKV', 'PPRLGICLD', 'RSYWACAVD', 'YLVKVGVGL', 'ECPLDCSGP', 'ERKVTIGGF', 'YERGRVSFL', 'RGRVSFLDA', 'QEPVGTKPE', 'ILLGSGASS', 'AVQLQEPVG', 'CPAFCFIGG', 'ACAVDPASY', 'ASYLVKVGV', 'LPPRLGICL', 'TIGMGKILL', 'GICLDYERG', 'SYWACAVDP', 'LQESFQGAP', 'PDVISPRYD', 'GAEDATVEA', 'GVGLESKLQ', 'DATVEASPP', 'SPRYDPDSG', 'LVKVGVGLE', 'VAVTQGRSY', 'LESKLQESF', 'FLTIGMGKI', 'PLPPRLGIC', 'DVISPRYDP', 'LDCSGPVCP', 'LDYERGRVS', 'ERGRVSFLD', 'DAVSFRGLL', 'AGCTVPLPP', 'SGAEDATVE', 'RLGICLDYE', 'GAVQLQEPV', 'LLECPLDCS', 'AFCFIGGGA', 'FAFLTIGMG', 'SFRGLLECP', 'TVEASPPFA', 'QGRSYWACA', 'LECPLDCSG', 'ASSNAGLTG', 'RYDPDSGHD', 'GGGAVQLQE', 'SPPFAFLTI', 'AFLTIGMGK', 'SSNAGLTGR', 'DVAVTQGRS', 'SFQGAPDVI', 'GRDGPTAGC', 'PERKVTIGG', 'GSGASSNAG', 'DGPTAGCTV', 'DSGAEDATV', 'WACAVDPAS', 'VISPRYDPD', 'LLGSGASSN', 'SNAGLTGRD', 'PPFAFLTIG', 'VSFRGLLEC', 'DPDSGHDSG', 'GCTVPLPPR', 'TQGRSYWAC', 'FLDAVSFRG', 'VCPAFCFIG', 'RVSFLDAVS', 'PRLGICLDY', 'PVCPAFCFI', 'IGGGAVQLQ', 'YDPDSGHDS', 'EDATVEASP', 'CTVPLPPRL', 'PFAFLTIGM', 'KILLGSGAS', 'PTAGCTVPL', 'GLESKLQES', 'ESKLQESFQ', 'TKPERKVTI', 'GKILLGSGA', 'TGRDGPTAG', 'KLQESFQGA', 'KVGVGLESK', 'SGASSNAGL', 'ASPPFAFLT', 'TVPLPPRLG', 'HDSGAEDAT', 'AVDPASYLV', 'VTQGRSYWA', 'LTIGMGKIL', 'EPVGTKPER', 'KPERKVTIG', 'FQGAPDVIS', 'FIGGGAVQL', 'AVTQGRSYW', 'LDAVSFRGL', 'FRGLLECPL', 'LGICLDYER', 'CAVDPASYL', 'SGPVCPAFC', 'RDGPTAGCT', 'VPLPPRLGI', 'CFIGGGAVQ', 'TAGCTVPLP', 'RKVTIGGFA', 'DSGHDSGAE']
-list10 = ['TISSFFLNS', 'EGAFVYLFL', 'VTEGAFVYL', 'TEGAFVYLF', 'LNSVTEGAF', 'SVTEGAFVY', 'SSFFLNSVT', 'ISSFFLNSV', 'FTHTISSFF', 'HTISSFFLN', 'NSVTEGAFV', 'SFTHTISSF', 'THTISSFFL', 'FLNSVTEGA', 'AFVYLFLGN', 'YLFLGNLLR', 'SFFLNSVTE', 'GESFTHTIS', 'AAGESFTHT', 'VYLFLGNLL', 'AGESFTHTI', 'GAFVYLFLG', 'FVYLFLGNL', 'ESFTHTISS', 'LFLGNLLRH', 'FFLNSVTEG']
-list11 = ['SGATRPYLP', 'GPQWLLRTD', 'CCPECPSGA', 'PYLPGPQWL', 'VPCCPECPS', 'PSGATRPYL', 'GATRPYLPG', 'CPECPSGAT', 'TRPYLPGPQ', 'GLVPCCPEC', 'LVPCCPECP', 'RPYLPGPQW', 'PRELGLVPC', 'PECPSGATR', 'LGLVPCCPE', 'ELGLVPCCP', 'ECPSGATRP', 'ATRPYLPGP', 'YLPGPQWLL', 'PGPQWLLRT', 'PCCPECPSG', 'RELGLVPCC', 'LPGPQWLLR', 'CPSGATRPY']
-list12 = ['QTPTVYALP', 'PLDWEQTPT', 'WEQTPTVYA', 'RGSGLEATG', 'NLKPRGSGL', 'ATGGLSDPW', 'SLVLQPEPL', 'EATGGLSDP', 'PRGSGLEAT', 'NSDTNLKPR', 'PTVYALPSP', 'GLSDPWASC', 'GGLSDPWAS', 'CQSLVLQPE', 'DWEQTPTVY', 'PWASCQSLV', 'DPWASCQSL', 'LKPRGSGLE', 'SGLEATGGL', 'LEATGGLSD', 'LVLQPEPLD', 'QSLVLQPEP', 'EPLDWEQTP', 'EQTPTVYAL', 'GSGLEATGG', 'GLEATGGLS', 'LQPEPLDWE', 'SDTNLKPRG', 'WASCQSLVL', 'DTNLKPRGS', 'LDWEQTPTV', 'TGGLSDPWA', 'TNLKPRGSG', 'VLQPEPLDW', 'YALPSPVPT', 'TVYALPSPV', 'TPTVYALPS', 'QPEPLDWEQ', 'ASCQSLVLQ', 'KPRGSGLEA', 'SDPWASCQS', 'LSDPWASCQ', 'SCQSLVLQP', 'VYALPSPVP', 'PEPLDWEQT']
-list13 = ['HNRYSGAWA', 'AAKQLHNRY', 'QLHNRYSGA', 'RYSGAWAPR', 'LHNRYSGAW', 'KQLHNRYSG', 'SGAWAPRGA', 'AWAPRGAGT', 'APRGAGTSW', 'QAAKQLHNR', 'WAPRGAGTS', 'YSGAWAPRG', 'PRGAGTSWM', 'GAWAPRGAG', 'NRYSGAWAP', 'AKQLHNRYS']
-list14 = ['SLLLAQGSA', 'GSFLLPTPQ', 'LPHPSAPGS', 'GSALGEETL', 'LGEETLPHP', 'QSLRSCTNR', 'SLRSCTNRP', 'LLAQGSALG', 'RSCTNRPSI', 'GFSLFSALF', 'ETLPHPSAP', 'LFFRFIFSL', 'LLLAQGSAL', 'ISFGFSLFS', 'SGSFLLPTP', 'SFLLPTPQS', 'LAQGSALGE', 'CTNRPSISF', 'TNRPSISFG', 'CDGSLLLAQ', 'AQGSALGEE', 'GSLLLAQGS', 'QSQSLRSCT', 'FGFSLFSAL', 'ALFFRFIFS', 'PSAPGSGSF', 'PHPSAPGSG', 'SQSLRSCTN', 'LLPTPQSQS', 'GCDGSLLLA', 'SFGFSLFSA', 'EETLPHPSA', 'APGSGSFLL', 'SAPGSGSFL', 'SCTNRPSIS', 'FLLPTPQSQ', 'DGSLLLAQG', 'PSISFGFSL', 'QGSALGEET', 'GEETLPHPS', 'GSGSFLLPT', 'PQSQSLRSC', 'SALGEETLP', 'HPSAPGSGS', 'RPSISFGFS', 'SLFSALFFR', 'TPQSQSLRS', 'ALGEETLPH', 'SALFFRFIF', 'FSALFFRFI', 'LRSCTNRPS', 'PGSGSFLLP', 'PTPQSQSLR', 'LPTPQSQSL', 'FSLFSALFF', 'TLPHPSAPG', 'SISFGFSLF', 'NRPSISFGF', 'LFSALFFRF']
 
-
-list_ = []
-for i in range(12,15):
-    list_ += eval('list{0}'.format(i))
-print(len(list_))
-toFasta(list_)
+#list1 = ['QSYLRMEQS', 'MEQSQPLGN', 'SYLRMEQSQ', 'RMEQSQPLG', 'LRMEQSQPL', 'YLRMEQSQP', 'EQSQPLGNK']
+#list2 = ['HLDNTIQSV', 'HHLDNTIQS', 'DNTIQSVFC', 'KTHHLDNTI', 'LSKTHHLDN', 'SKTHHLDNT', 'THHLDNTIQ', 'LDNTIQSVF', 'HLSKTHHLD']
+#list3 = ['RRVELLRSS', 'LLRSSGDIV', 'DRRVELLRS', 'VELLRSSGD', 'RVELLRSSG', 'ELLRSSGDI', 'LRSSGDIVM', 'GDRRVELLR', 'RSSGDIVMT']
+#list4 = ['MWILRTSSS', 'LRTSSSWEM', 'SCMWILRTS', 'CMWILRTSS', 'RTSSSWEMC', 'ILRTSSSWE', 'WILRTSSSW']
+#list5 = ['DNFLLTMVA', 'FLLTMVAEF', 'TMVAEFWRL', 'QDNFLLTMV', 'SGQDNFLLT', 'NFLLTMVAE', 'GQDNFLLTM', 'LLTMVAEFW', 'LTMVAEFWR']
+#list6 = ['NLHWLHKIG', 'GLVVILAST', 'ALCHIAVGQ', 'HWLHKIGLV', 'LHWLHKIGL', 'KIGLVVILA', 'ILASTVVAM', 'QQMNLHWLH', 'LHKIGLVVI', 'HIAVGQQMN', 'LCHIAVGQQ', 'IAVGQQMNL', 'VVILASTVV', 'IGLVVILAS', 'AVGQQMNLH', 'GQQMNLHWL', 'QMNLHWLHK', 'WLHKIGLVV', 'HKIGLVVIL', 'VGQQMNLHW', 'VLALCHIAV', 'LALCHIAVG', 'MNLHWLHKI', 'CHIAVGQQM', 'VILASTVVA', 'LVVILASTV']
+#list7 = ['DCSARMKSS', 'RGQLDCSAR', 'KTCLGLPRR', 'CLGLPRRGQ', 'LDCSARMKS', 'FILKTCLGL', 'GLPRRGQLD', 'RRGQLDCSA', 'PRRGQLDCS', 'LPRRGQLDC', 'RMKSSFTEK', 'QLDCSARMK', 'FTEKRGQYW', 'LKTCLGLPR', 'ILKTCLGLP', 'TCLGLPRRG', 'TEKRGQYWD', 'RNFILKTCL', 'SSFTEKRGQ', 'KRGQYWDHL', 'GQLDCSARM', 'MKSSFTEKR', 'SFTEKRGQY', 'CSARMKSSF', 'ARMKSSFTE', 'KSSFTEKRG', 'SARMKSSFT', 'EKRGQYWDH', 'LGLPRRGQL', 'NFILKTCLG']
+#list8 = ['GSVGHGSPG', 'RRGSVGHGS', 'RGSVGHGSP', 'ERRGSVGHG', 'PERRGSVGH', 'VPERRGSVG', 'LVPERRGSV']
+#list9 = ['SKLQESFQG', 'IGMGKILLG', 'GDVAVTQGR', 'ATVEASPPF', 'MGKILLGSG', 'VTIGGFAKL', 'KVTIGGFAK', 'GMGKILLGS', 'YWACAVDPA', 'QLQEPVGTK', 'PVGTKPERK', 'PLDCSGPVC', 'TIGGFAKLD', 'PRYDPDSGH', 'LTGRDGPTA', 'GASSNAGLT', 'ICLDYERGR', 'GRVSFLDAV', 'GLLECPLDC', 'GAPDVISPR', 'EASPPFAFL', 'LQEPVGTKP', 'VGVGLESKL', 'DYERGRVSF', 'SYLVKVGVG', 'AVSFRGLLE', 'CPLDCSGPV', 'LGSGASSNA', 'GPVCPAFCF', 'FCFIGGGAV', 'GHDSGAEDA', 'PAFCFIGGG', 'VEASPPFAF', 'SGHDSGAED', 'GPTAGCTVP', 'AEDATVEAS', 'GGAVQLQEP', 'CSGPVCPAF', 'DPASYLVKV', 'VQLQEPVGT', 'VGLESKLQE', 'APDVISPRY', 'QESFQGAPD', 'VKVGVGLES', 'PASYLVKVG', 'ESFQGAPDV', 'GRSYWACAV', 'GLTGRDGPT', 'DCSGPVCPA', 'SFLDAVSFR', 'GTKPERKVT', 'PDSGHDSGA', 'AGLTGRDGP', 'ISPRYDPDS', 'VSFLDAVSF', 'RGLLECPLD', 'VDPASYLVK', 'QGAPDVISP', 'NAGLTGRDG', 'CLDYERGRV', 'VGTKPERKV', 'PPRLGICLD', 'RSYWACAVD', 'YLVKVGVGL', 'ECPLDCSGP', 'ERKVTIGGF', 'YERGRVSFL', 'RGRVSFLDA', 'QEPVGTKPE', 'ILLGSGASS', 'AVQLQEPVG', 'CPAFCFIGG', 'ACAVDPASY', 'ASYLVKVGV', 'LPPRLGICL', 'TIGMGKILL', 'GICLDYERG', 'SYWACAVDP', 'LQESFQGAP', 'PDVISPRYD', 'GAEDATVEA', 'GVGLESKLQ', 'DATVEASPP', 'SPRYDPDSG', 'LVKVGVGLE', 'VAVTQGRSY', 'LESKLQESF', 'FLTIGMGKI', 'PLPPRLGIC', 'DVISPRYDP', 'LDCSGPVCP', 'LDYERGRVS', 'ERGRVSFLD', 'DAVSFRGLL', 'AGCTVPLPP', 'SGAEDATVE', 'RLGICLDYE', 'GAVQLQEPV', 'LLECPLDCS', 'AFCFIGGGA', 'FAFLTIGMG', 'SFRGLLECP', 'TVEASPPFA', 'QGRSYWACA', 'LECPLDCSG', 'ASSNAGLTG', 'RYDPDSGHD', 'GGGAVQLQE', 'SPPFAFLTI', 'AFLTIGMGK', 'SSNAGLTGR', 'DVAVTQGRS', 'SFQGAPDVI', 'GRDGPTAGC', 'PERKVTIGG', 'GSGASSNAG', 'DGPTAGCTV', 'DSGAEDATV', 'WACAVDPAS', 'VISPRYDPD', 'LLGSGASSN', 'SNAGLTGRD', 'PPFAFLTIG', 'VSFRGLLEC', 'DPDSGHDSG', 'GCTVPLPPR', 'TQGRSYWAC', 'FLDAVSFRG', 'VCPAFCFIG', 'RVSFLDAVS', 'PRLGICLDY', 'PVCPAFCFI', 'IGGGAVQLQ', 'YDPDSGHDS', 'EDATVEASP', 'CTVPLPPRL', 'PFAFLTIGM', 'KILLGSGAS', 'PTAGCTVPL', 'GLESKLQES', 'ESKLQESFQ', 'TKPERKVTI', 'GKILLGSGA', 'TGRDGPTAG', 'KLQESFQGA', 'KVGVGLESK', 'SGASSNAGL', 'ASPPFAFLT', 'TVPLPPRLG', 'HDSGAEDAT', 'AVDPASYLV', 'VTQGRSYWA', 'LTIGMGKIL', 'EPVGTKPER', 'KPERKVTIG', 'FQGAPDVIS', 'FIGGGAVQL', 'AVTQGRSYW', 'LDAVSFRGL', 'FRGLLECPL', 'LGICLDYER', 'CAVDPASYL', 'SGPVCPAFC', 'RDGPTAGCT', 'VPLPPRLGI', 'CFIGGGAVQ', 'TAGCTVPLP', 'RKVTIGGFA', 'DSGHDSGAE']
+#list10 = ['TISSFFLNS', 'EGAFVYLFL', 'VTEGAFVYL', 'TEGAFVYLF', 'LNSVTEGAF', 'SVTEGAFVY', 'SSFFLNSVT', 'ISSFFLNSV', 'FTHTISSFF', 'HTISSFFLN', 'NSVTEGAFV', 'SFTHTISSF', 'THTISSFFL', 'FLNSVTEGA', 'AFVYLFLGN', 'YLFLGNLLR', 'SFFLNSVTE', 'GESFTHTIS', 'AAGESFTHT', 'VYLFLGNLL', 'AGESFTHTI', 'GAFVYLFLG', 'FVYLFLGNL', 'ESFTHTISS', 'LFLGNLLRH', 'FFLNSVTEG']
+#list11 = ['SGATRPYLP', 'GPQWLLRTD', 'CCPECPSGA', 'PYLPGPQWL', 'VPCCPECPS', 'PSGATRPYL', 'GATRPYLPG', 'CPECPSGAT', 'TRPYLPGPQ', 'GLVPCCPEC', 'LVPCCPECP', 'RPYLPGPQW', 'PRELGLVPC', 'PECPSGATR', 'LGLVPCCPE', 'ELGLVPCCP', 'ECPSGATRP', 'ATRPYLPGP', 'YLPGPQWLL', 'PGPQWLLRT', 'PCCPECPSG', 'RELGLVPCC', 'LPGPQWLLR', 'CPSGATRPY']
+#list12 = ['QTPTVYALP', 'PLDWEQTPT', 'WEQTPTVYA', 'RGSGLEATG', 'NLKPRGSGL', 'ATGGLSDPW', 'SLVLQPEPL', 'EATGGLSDP', 'PRGSGLEAT', 'NSDTNLKPR', 'PTVYALPSP', 'GLSDPWASC', 'GGLSDPWAS', 'CQSLVLQPE', 'DWEQTPTVY', 'PWASCQSLV', 'DPWASCQSL', 'LKPRGSGLE', 'SGLEATGGL', 'LEATGGLSD', 'LVLQPEPLD', 'QSLVLQPEP', 'EPLDWEQTP', 'EQTPTVYAL', 'GSGLEATGG', 'GLEATGGLS', 'LQPEPLDWE', 'SDTNLKPRG', 'WASCQSLVL', 'DTNLKPRGS', 'LDWEQTPTV', 'TGGLSDPWA', 'TNLKPRGSG', 'VLQPEPLDW', 'YALPSPVPT', 'TVYALPSPV', 'TPTVYALPS', 'QPEPLDWEQ', 'ASCQSLVLQ', 'KPRGSGLEA', 'SDPWASCQS', 'LSDPWASCQ', 'SCQSLVLQP', 'VYALPSPVP', 'PEPLDWEQT']
+#list13 = ['HNRYSGAWA', 'AAKQLHNRY', 'QLHNRYSGA', 'RYSGAWAPR', 'LHNRYSGAW', 'KQLHNRYSG', 'SGAWAPRGA', 'AWAPRGAGT', 'APRGAGTSW', 'QAAKQLHNR', 'WAPRGAGTS', 'YSGAWAPRG', 'PRGAGTSWM', 'GAWAPRGAG', 'NRYSGAWAP', 'AKQLHNRYS']
+#list14 = ['SLLLAQGSA', 'GSFLLPTPQ', 'LPHPSAPGS', 'GSALGEETL', 'LGEETLPHP', 'QSLRSCTNR', 'SLRSCTNRP', 'LLAQGSALG', 'RSCTNRPSI', 'GFSLFSALF', 'ETLPHPSAP', 'LFFRFIFSL', 'LLLAQGSAL', 'ISFGFSLFS', 'SGSFLLPTP', 'SFLLPTPQS', 'LAQGSALGE', 'CTNRPSISF', 'TNRPSISFG', 'CDGSLLLAQ', 'AQGSALGEE', 'GSLLLAQGS', 'QSQSLRSCT', 'FGFSLFSAL', 'ALFFRFIFS', 'PSAPGSGSF', 'PHPSAPGSG', 'SQSLRSCTN', 'LLPTPQSQS', 'GCDGSLLLA', 'SFGFSLFSA', 'EETLPHPSA', 'APGSGSFLL', 'SAPGSGSFL', 'SCTNRPSIS', 'FLLPTPQSQ', 'DGSLLLAQG', 'PSISFGFSL', 'QGSALGEET', 'GEETLPHPS', 'GSGSFLLPT', 'PQSQSLRSC', 'SALGEETLP', 'HPSAPGSGS', 'RPSISFGFS', 'SLFSALFFR', 'TPQSQSLRS', 'ALGEETLPH', 'SALFFRFIF', 'FSALFFRFI', 'LRSCTNRPS', 'PGSGSFLLP', 'PTPQSQSLR', 'LPTPQSQSL', 'FSLFSALFF', 'TLPHPSAPG', 'SISFGFSLF', 'NRPSISFGF', 'LFSALFFRF']
+#
+#
+#list_ = []
+#for i in range(12,15):
+#    list_ += eval('list{0}'.format(i))
+#print(len(list_))
+#toFasta(list_)
     
     
     

@@ -7,7 +7,7 @@ Created on Mon Mar 30 17:32:27 2020
 """
 
 import os
-os.chdir('/Users/ligk2e/Desktop/project/')
+os.chdir('/Users/ligk2e/Desktop/project_breast/R1-V6/')
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
@@ -18,8 +18,11 @@ import regex
 import re
 from time import process_time
 import collections
-import backgroundGTEx as GTEx
-import intronRetention as IR
+from urllib.error import HTTPError
+import requests
+#from backgroundGTEx import backgroundGTEx,convertExonList,merPassGTExCheck,spread,getNmerNormal
+#from intronRetention import intron,grabEnsemblTranscriptTable
+
 
 class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannually set __repr__ or __str__
     def __init__(self, df):
@@ -107,6 +110,7 @@ class NeoJ(Meta):
         for i in range(self.df.shape[0]):
             wholeTrans = list(self.df['exam_whole_transcripts'])[i]
             ORFtrans = list(self.df['exam_ORF_tran'])[i]
+            junctionOri = list(self.df['exam_seq'])[i]  # have comma to delimit former and latter part
             junction = list(self.df['exam_seq'])[i].replace(',','')
             phaseArray,peptideArray = [],[]
             if not wholeTrans:             # the EnsGID doesn't exist in mRNA-exon file
@@ -114,7 +118,9 @@ class NeoJ(Meta):
                 peptideArray.append('#')
                 print('This gene {0} is absent in mRNA-ExonID file\n'.format(list(self.df['UID'])[i]))
             for j in range(len(wholeTrans)):
-                if not wholeTrans[j]: pass   # splicing evnet can not match to this transcript
+                if not wholeTrans[j]: 
+                    phaseArray.append('') 
+                    peptideArray.append('') # splicing evnet can not match to this transcript
                 else:
                     startJun = wholeTrans[j].find(junction[:-1]) # trim the right-most overhang for simplicity
                     endJun = startJun + len(junction[:-1])
@@ -128,66 +134,106 @@ class NeoJ(Meta):
                         print('The {}th transcript of {}, even though junction site\
                         could match with, but optimal ORF suggests that junction site will not be translated'.format(j,list(self.df['UID'])[i]))
                     else: 
-                        phase = abs(startJun - startORF) % 3 # phase 0 means junction will translate in 0 base
-                        peptide = str(Seq(junction[phase:-1],generic_dna).translate(to_stop=False))
+                        former = junctionOri.find(',')  # length of former part, also the index of splicesite
+                        phase = abs(startJun + former - startORF) % 3 
+                        N = self.mer
+                         
+                        if phase == 0: 
+                            front=0 if former - ((N-1)*3) < 0 else former - (N-1)*3
+                            
+                            junctionSlice = junction[front: former + ((N-1)*3)].replace(',','')
+                            print(junctionSlice)
+                        elif phase == 1: 
+                            front=0 if former - ((N-1)*3+1) <0 else former - ((N-1)*3+1)
+                            junctionSlice = junction[front: former + ((N-1)*3+2)].replace(',','')
+                            
+                        elif phase == 2: 
+                            front=0 if former- ((N-1)*3+2) <0 else former- ((N-1)*3+2)
+                            junctionSlice = junction[front: former + ((N-1)*3+1)].replace(',','')
+                 
+            
+                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                        print(peptide)
+                    
+                        
+                        
+                        
+                        
+                        
+
                         phaseArray.append(phase)
                         peptideArray.append(peptide)
             
             col0.append(phaseArray) 
             col1.append(peptideArray)
-        self.df['phase'] = col0
-        self.df['peptide'] = col1
+        self.df['phase'] = col0 # ['',1,'*',2] OR ['#']
+        self.df['peptide'] = col1  # ['',MSTTG,'*',TYCTT] OR ['#']
                 
     def getNmer(self):
         col = []
         for i in range(self.df.shape[0]):
             peptides = list(self.df['peptide'])[i]
             merArray = []
-            if not peptides: merArray.append('MANNUAL')
+            condition = any([False if pep=='' else True for pep in peptides]) # if False, means ['','',''], means can not match with any of existing transcript
+            if not condition: merArray.append('MANNUAL')
             else:
                 for peptide in peptides:
-                    if peptide == '*': merArray.append('*')
+                    if peptide == '': merArray.append('')
+                    elif peptide == '*': merArray.append('*')
                     else: 
                         tempArray = extractNmer(peptide,self.mer)
                         merArray.append(tempArray)
             truthTable1 = [False if mer == '*' or mer == [] else True for mer in merArray]
-            if not any(truthTable1): merArray = ['Match but no translation or ealy stop, MANNUAL']
-            col.append(merArray)
+            if not any(truthTable1): merArray = ['Match but no translation or early stop']
+            col.append(merArray)  # [ '','*',[], ['MTDJDKFDJF','FJDKFJDF'] ]
         self.df['{0}mer'.format(self.mer)] = col
         
     def getFinalMers(self):
         col = []
         for i in range(self.df.shape[0]):
             uid, merArray = list(self.df['UID'])[i], list(self.df['{0}mer'.format(self.mer)])[i]
-            col.append(GTEx.merPassGTExCheck(dictGTEx,uid,merArray))
+            col.append(merPassGTExCheck(dictGTEx,uid,merArray))
         self.df['matchedFinalMer'] = col
                  
-    def mannual(self):
+    def mannual(self,check=False):
         col = []
         for i in range(self.df.shape[0]):
             merArray = []
-            uid,junction,mer9 = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['{0}mer'.format(self.mer)].tolist()[i]
-            if mer9 == ['MANNUAL']: 
+            uid,junction,Nmer = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['{0}mer'.format(self.mer)].tolist()[i]
+            if Nmer == ['MANNUAL']: 
                 EnsGID = uid.split('|')[0].split(':')[1]
                 x = uid.split('|')
                 try: x[0].split(':')[3]   # these try-excepts aim to consider fusion gene situation
                 except IndexError: event = x[0].split(':')[2]
-                else: event = str(x[0].split(':')[2])+':'+str(x[0].split(':')[3])                                        
+                else: event = str(x[0].split(':')[2])+':'+str(x[0].split(':')[3])     # E22-ENSG:E31  
+                try: x[1].split(':')[2]
+                except IndexError: backEvent = x[1].split(':')[1]
+                else: backEvent = x[1].split(':')[2]                         
                 if re.search(r'I.+_\d+',event) or 'U' in event:  # they belong to NewExon type: including UTR type and blank type(the annotation is blank)
                 # for NewExon type, no need to infer translation phase, just use junction sequence, mer should span junction site
                     junctionIndex = junction.find(',')
-                    junctionSlice = junction[junctionIndex-((self.mer*3)-1):junctionIndex+(self.mer*3)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
-                    merTumor = dna2aa2mer(junctionSlice,self.mer)   # merTumor is a nested list
-                    merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
+                    Nminus1 = self.mer - 1 
+                    junctionSlice = junction[junctionIndex-((Nminus1*3)-1):junctionIndex+(Nminus1*3)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
+                    merArray = dna2aa2mer(junctionSlice,self.mer)   # merArray is a nested list
+                    if check == True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                 if re.search(r'E\d+\.\d+_\d+',event) or 'ENSG' in event:  # they belong to newSplicing site or fusion gene
                 # for this type, just check if the former part (E1.2-E3.4, here E1.2 is former part) exist in known transcript, then infer the phase of translation
-                    merTumor = newSplicingSite(event,EnsGID,junction,self.mer)   # nested list
-                    merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
-                    if merArray == []: merArray = ['newSplicing or fusion gene, already checked, either not translated or be eliminated by background check']
+                    print(event)
+                    merArray = newSplicingSite(event,EnsGID,junction,self.mer,dictExonList,dict_exonCoords)   # nested list
+                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
+                    if merArray == [[]]: merArray = ['newSplicing or fusion gene, already checked, query subexon not present in known transcript']
                 if re.search(r'^I\d+\.\d+-',event) or re.search(r'-I\d+\.\d+$',event):
-                    merTumor = IR.intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
-                    merArray = GTEx.merPassGTExCheck(dictGTEx,uid,merTumor)
-                    if merArray == []: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
+                    merTumor = intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
+                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
+                    if merArray == [[]]: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
+                if re.search(r'E\d+\.\d+-E\d+\.\d+$',event):   # novel splicing: CLASP1:ENSG00000074054:E25.1-E26.1, just don't match with any existing one
+                    # here we extract the backEvent, which is E24.1-E27.1
+                    print(event)
+                    backEvent = backEvent.replace('-','|')  # now it is E24.1|E27.1
+                    merArray = novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,self.mer)
+                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
+                    if merArray ==[[]]: merArray = ['novel ordinal splicing event, already checked, its background event can not match up with any existing transcript either']
+                    
             col.append(merArray)
         self.df['mannual'] = col
         
@@ -200,21 +246,101 @@ class NeoJ(Meta):
             if not i in filterBucket: list_ += i
         self.mhcNeoAntigens = list(set(list_))
         
+def novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,N): # E25.1-E26.1
+    latter = event.split('-')[1]  # E26.1
+    attrs = dict_exonCoords[EnsGID][latter] #  chr, strand, start, end
+    strand,start = attrs[1], attrs[2]
+    merBucket = []
+    allTransDict = dictExonList[EnsGID]
+    for tran,exonlist in allTransDict.items():
+        if backEvent in exonlist:
+            try:tranStartIndex = grabEnsemblTranscriptTable(tran)
+            except HTTPError: continue
+            else:
+                if type(tranStartIndex) == int:
+                     if strand == '+':
+                         remainder = (int(start) - tranStartIndex) % 3   
+                         if remainder == 0: 
+                             front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                             junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                         elif remainder == 1: 
+                             front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                             junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                         elif remainder == 2: 
+                             front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                             junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+                     elif strand == '-':
 
-
-def newSplicingSite(event,EnsGID,junction,N):   # one stop solution for newSplicingSite type
-    partialJunction = junction.split(',')[0]
-    fullJunction = junction.replace(',','')
-    try: event.split('-')[0].split('_')[1]   # see if the former one has trailing part E1.2_8483494
-    except IndexError: former = event.split('-')[0]  # no trailing part, former part just E1.2
-    else: former = event.split('-')[0].split('_')[0]  # has trailing part, former part should get rid of trailing part
-    finally:
-        wholeTranscripts = core_match(df_exonlist,dict_exonCoords,EnsGID,former)
-        allORFs = [transcript2peptide(tran) for tran in wholeTranscripts]
-        phaseArray,peptideArray = getPhasePeptide(EnsGID,wholeTranscripts,allORFs,partialJunction,fullJunction)
-        merArray = [extractNmer(peptide,N) for peptide in peptideArray]   # nested list
+                         remainder = (tranStartIndex - int(start)) % 3 
+                         if remainder == 0: 
+                             front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                             junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                         elif remainder == 1: 
+                             front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                             junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                         elif remainder == 2: 
+                             front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                             junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+                
+                     peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                     merArray = extractNmer(peptide,N) 
+                     merBucket.append(merArray)
+        if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
            
-    return merArray
+    return merBucket
+                            
+                    
+
+def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # one stop solution for newSplicingSite type
+    try: event.split('-')[0].split('_')[1]   # see if the former one has trailing part E1.2_8483494
+    except IndexError: 
+        former = event.split('-')[0]  # no trailing part, former part just E1.2, means newSplicingSite is in latter part
+        query = event.split('-')[1].split('_')[0]
+        trailing = event.split('-')[1].split('_')[1]
+    else: 
+        query = event.split('-')[0].split('_')[0]  # has trailing part, former part should get rid of trailing part
+        trailing = event.split('-')[0].split('_')[1]
+    finally:
+        merBucket = []   
+        attrs = dict_exonCoords[EnsGID][query] # chr, strand, start, end
+        strand = attrs[1]        
+        allTransDict = dictExonList[EnsGID] 
+        for tran,exonlist in allTransDict.items():
+            if query in exonlist: 
+                try:tranStartIndex = grabEnsemblTranscriptTable(tran)
+                except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
+                else:
+                    if type(tranStartIndex) == int:
+                        if strand == '+':
+                            remainder = (int(trailing) - tranStartIndex) % 3   
+                            if remainder == 0: 
+                                front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                            elif remainder == 1: 
+                                front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+                        elif strand == '-':
+
+                            remainder = (tranStartIndex - int(trailing)) % 3 
+                            if remainder == 0: 
+                                front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                            elif remainder == 1: 
+                                front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+                
+                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                        merArray = extractNmer(peptide,N) 
+                        merBucket.append(merArray)
+        if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
+           
+    return merBucket
 
 def getPhasePeptide(EnsGID,wholeTrans,ORFtrans,partialJunction,fullJunction):   # used in newSplicingSite situation
     phaseArray,peptideArray = [],[]
@@ -223,7 +349,9 @@ def getPhasePeptide(EnsGID,wholeTrans,ORFtrans,partialJunction,fullJunction):   
         peptideArray.append('#')
         print('This gene {0} is absent in mRNA-ExonID file\n'.format(EnsGID))
     for j in range(len(wholeTrans)):
-        if not wholeTrans[j]: pass   # splicing evnet can not match to this transcript
+        if not wholeTrans[j]: 
+             phaseArray.append('') 
+             peptideArray.append('')# splicing evnet can not match to this transcript
         else:
             startJun = wholeTrans[j].find(partialJunction[:-1]) # trim the right-most overhang for simplicity
             endJun = startJun + len(partialJunction[:-1])
@@ -237,8 +365,20 @@ def getPhasePeptide(EnsGID,wholeTrans,ORFtrans,partialJunction,fullJunction):   
                 print('The {}th transcript of {}, even though junction site\
                 could match with, but optimal ORF suggests that junction site will not be translated'.format(j,EnsGID))
             else: 
-                phase = abs(startJun - startORF) % 3 # phase 0 means junction will translate in 0 base
-                peptide = str(Seq(fullJunction[phase:-1],generic_dna).translate(to_stop=False))
+                
+                
+        
+                former = fullJunction.find(',')  # length of former part, also the index of splicesite
+                phase = abs(startJun + former - startORF) % 3 
+                N = self.mer
+                 
+                if phase == 0: junctionSlice = junction[former - ((N-1)*3): former + ((N-1)*3)].replace(',','')
+                elif phase == 1: junctionSlice = junction[former - ((N-1)*3+1):former + ((N-1)*3+2)].replace(',','')
+                elif phase == 2: junctionSlice = junction[former- ((N-1)*3+2): former + ((N-1)*3+1)].replace(',','')
+         
+    
+                peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                
                 phaseArray.append(phase)
                 peptideArray.append(peptide)
     return phaseArray,peptideArray
@@ -261,7 +401,7 @@ def dna2aa2mer(dna,N):
               
                 
              
-def extractNmer(peptide,N):
+def extractNmer(peptide,N):  # it already considers '' and '*'
     starIndex = peptide.find('*') 
    # print(starIndex)
     merArray = []
@@ -384,7 +524,7 @@ def core_match(df_exonlist,dict_exonCoords,EnsID,Exons):
    
     try:
         df_certain = df_exonlist[df_exonlist['EnsGID'] == EnsID]
-    except: full_transcript_store = []
+    except: full_transcript_store = []  # EnsGID is absent in df_exonlist
     full_transcript_store = []
     for item in list(df_certain['Exons']):
         full_transcript=''
@@ -408,7 +548,7 @@ def core_match(df_exonlist,dict_exonCoords,EnsID,Exons):
             full_transcript_store.append(full_transcript)   
         else: 
             full_transcript_store.append('')
-    return full_transcript_store
+    return full_transcript_store  # ['','ATTTTT','TTTGGCC'], # [] if EnsGID is not present in exonlist
 
 def check_exonlist_general(exonlist,index,strand):
     dict = {}
@@ -432,7 +572,7 @@ def check_exonlist_general(exonlist,index,strand):
         else: return True
         
 def neoJunctions(df):
-    dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df['avg-Healthy__U2AF1-CV'] <= 0.23))]
+    dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df['avg-Others'] <= 0.23))]
     return dfNeoJunction  
     
 def uid(df, i):
@@ -583,6 +723,219 @@ def exonCoords_to_dict(path,delimiter):
     # final structure {'EnsID':{E1:[chr,strand,start,end],E2:[chr,strand,start,end]}}
     return dict_exonCoords
 
+def backgroundGTEx(N,dict_fa,dictExonList,dict_exonCoords):
+    '''
+    Run following command in your terminal, get sampleType.txt, wholeBloodID,allsampleID.txt
+    
+    cut -f 1,7 GTEx_Analysis_v8_Annotations_SampleAttributesDS.txt | awk 'BEGIN {FS="\t";} {if (NR>1) {print $1 "\t" $2;}}' > sampleType.txt
+    awk '{if ($2 ~/Whole/) {print $1}}' sampleType.txt > wholeBloodID.txt 
+    head -n 3 GTEx_Analysis_2017-06-05_v8_RSEMv1.3.0_transcript_tpm.gct | tail -n 1 | tr '\t' '\n' | awk 'NR>2' > allsampleID.txt
+    
+    '''
+    
+    wholeBloodID = list(pd.read_csv('BreastID.txt',sep='\n',header=None,names=['id'])['id'])
+    allsampleID = list(pd.read_csv('allsampleID.txt',sep='\n',header=None,names=['id'])['id'])
+    overlapID = []
+    for id_ in allsampleID:
+        if id_ in wholeBloodID: overlapID.append(id_)
+    
+    if os.path.exists('tranTPMsim.p'):
+        with open('tranTPMsim.p','rb') as file1:
+            tranTPMsim = pickle.load(file1)
+    else:            
+        tranTPMexp = pd.read_csv('GTEx_Analysis_2017-06-05_v8_RSEMv1.3.0_transcript_tpm.gct',sep='\t',skiprows=2,usecols=overlapID)
+        tranTPMid = pd.read_csv('GTEx_Analysis_2017-06-05_v8_RSEMv1.3.0_transcript_tpm.gct',sep='\t',skiprows=2,usecols=['transcript_id','gene_id'])
+        tranTPM = pd.concat([tranTPMid,tranTPMexp],axis = 1, sort = False)
+        ave = tranTPM.mean(axis = 1, skipna = True, numeric_only = True)
+        tranTPM = pd.concat([tranTPM,ave],axis=1,sort=False)
+        tranTPMsim = tranTPM.drop(overlapID,axis = 1)
+        tranTPMsim = tranTPMsim.rename(columns={0:'mean'})  # change the last average column's name to 'mean'
+
+        with open('tranTPMsim.p','wb') as file2:
+            pickle.dump(tranTPMsim,file2)
+    '''
+    transcript_id  gene_id    mean
+      EnsTID        EnsGID    0.08
+      
+    '''
+    # convert to a dict
+    if os.path.exists('dictGTEx.p'):
+        with open('dictGTEx.p','rb') as file3:
+            dictGTEx = pickle.load(file3)
+    else:            
+        dictGTEx = {}
+        for i in range(tranTPMsim.shape[0]):
+            EnsGID = tranTPMsim.iat[i,1][:15]
+            EnsTID = tranTPMsim.iat[i,0][:15]
+            mean = tranTPMsim.iat[i,2]
+            if mean > 0.3: highExpression = True
+            else: highExpression = False
+            if highExpression: merArrayNormal = getNmerNormal(EnsGID,EnsTID,N,dict_fa,dictExonList,dict_exonCoords)  # merArrayNormal is all 9mer for each transcript that expresses in normal tissue
+            try: 
+                dictGTEx[EnsGID][0][EnsTID] = highExpression
+                try: merArrayNormal   
+                except NameError: pass  # if no merArrayNormal, means that this transcript is not highly expressed
+                else:dictGTEx[EnsGID][1]['wholeMerArrayNormal'].append(merArrayNormal)
+            except KeyError: dictGTEx[EnsGID] = [{EnsTID:highExpression},{'wholeMerArrayNormal':[]}]
+        with open('dictGTEx.p','wb') as file4:
+            pickle.dump(dictGTEx,file4)
+
+        # {'EnsGID:[{EnsTID:False,EnsID:True},{'wholeMerArrayNormal':[['DJFD','FKJDF'],['DJFD','FKJDF']]}]}
+    return dictGTEx
+ 
+def convertExonList(df):
+    dictExonList = {}
+    for i in range(df.shape[0]):
+        EnsGID = df.iat[i,0]
+        EnsTID = df.iat[i,1]
+        exonList = df.iat[i,3]
+        try: dictExonList[EnsGID][EnsTID] = exonList
+        except KeyError: dictExonList[EnsGID] = {EnsTID:exonList}
+        # {EnsGID:{EnsTID:exonlist,EnsTID:exonlist}}
+    return dictExonList
+    
+
+
+def merPassGTExCheck(dictGTEx,uid,merArray):   # pass nested list [[],[],[]]
+    EnsGID = uid.split('|')[0].split(':')[1]
+    normalMer = dictGTEx[EnsGID][1]['wholeMerArrayNormal']
+    arrangedNormal = spread(normalMer)
+    arrangedSplicing = spread(merArray)
+    uniqueInSplicing = list(arrangedSplicing - arrangedNormal)
+    return uniqueInSplicing
+    
+
+def spread(list_):
+    ret = []
+    for i in list_:
+        ret.extend(i) if isinstance(i,list) else ret.append(i)
+    ret = set(ret)
+    return ret
+
+
+
+    
+
+    
+        
+    
+
+    
+    
+    
+def flattenNestedList(list_,mode=0,clean=False): # mode = 0 means returning flatten list, mode = 1 means converting to set, mode = 2 means converting to list(set())
+    # input a nested list, only extract element from non-empty sub list.
+    flatten = []
+    if not clean:
+        for sublist in list_:
+            flatten = [item for item in sublist]
+        if mode == 0: return flatten
+        elif mode == 1: return set(flatten)
+        elif mode == 2: return list(set(flatten))
+    elif clean:   # clean will remove '*',[],'MANNUAL'
+        for sublist in list_:
+            if isinstance(sublist,list) and sublist:  # if the sub is a non-empty list
+                flatten = [item for item in sublist]
+        if mode == 0: return flatten
+        elif mode == 1: return set(flatten)
+        elif mode == 2: return list(set(flatten))
+            
+
+
+
+
+           
+def getNmerNormal(EnsID,EnsTID,N,dict_fa,dictExonList,dict_exonCoords):
+    try:exonlist = dictExonList[EnsID][EnsTID] 
+    except KeyError: print('{0} of {1} doesn\'t exist in mRNA-ExonID file'.format(EnsTID,EnsID))                             
+    # obtain the full-length sequence for this exonlist to check its resultant 9mer
+    else:
+        Exonlist = exonlist.split('|')  # [E1.1,E1.2,E3.4....]
+        full_transcript = ''
+        for j in range(len(Exonlist)):
+            coords = dict_exonCoords[EnsID][Exonlist[j]]
+            strand = coords[1]
+            judge = check_exonlist_general(Exonlist,j,strand)
+            if strand == '+' and judge:   
+                frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
+            elif strand == '+' and not judge:
+                frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
+            elif strand == '-' and judge:
+                frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
+            elif strand == '-' and not judge:
+                frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
+            # expression of minus strand, need to draw an illustrator to visulize that.
+            full_transcript += frag
+        full_transcript = full_transcript.replace('\n','')
+    
+    
+        # continue to get ORF
+        ORF = transcript2peptide(full_transcript)
+        peptide = str(Seq(ORF,generic_dna).translate(to_stop=False))
+        merArray = extractNmer(peptide,N)  # all the 9mer the normal
+        return merArray   # ['SRTTIFDFJD','FJDJFKDJFKDJ','FJKDFJKDF']
+    
+def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
+    merBucket = []
+    if event.startswith('E'):   # only consider this situation, since intron retentions are predominantly associated with a translatable preceding exon, ending up with a early stop codon
+        # namely: E2.4-I2.1, E22.1-I22.1
+        former = event.split('-')[0]  # E2.4, E22.1
+        attrs = dict_exonCoords[EnsGID][former] # chr, strand, start, end
+        strand = attrs[1]        
+        allTransDict = dictExonList[EnsGID] 
+        for tran,exonlist in allTransDict.items():
+            if former in exonlist: 
+                try:tranStartIndex = grabEnsemblTranscriptTable(tran)
+                except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
+                else:
+                    if type(tranStartIndex) == int:
+                        if strand == '+':
+                            intronStartIndex = int(attrs[3]) + 1
+                            remainder = (intronStartIndex - tranStartIndex) % 3   # how many nts remaining before the first nt in intron
+                            # if 0, means the first nt in intron will be the first nt in codon triplet,
+                            # if 1, means the first nt in intron will be the second nt in codon triplet,
+                            # if 2, means the first nt in intron will be the third nt in codon triplet.
+                            if remainder == 0: 
+                                front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                            elif remainder == 1: 
+                                front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+1)].replace(',','')
+                        elif strand == '-':
+                            intronStartIndex = int(attrs[3]) - 1
+                            remainder = (tranStartIndex - intronStartIndex) % 3 
+                            if remainder == 0: 
+                                front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                            elif remainder == 1: 
+                                front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+1)].replace(',','')
+                
+                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                        merArray = extractNmer(peptide,N) 
+                        merBucket.append(merArray)
+        if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
+        
+    elif event.startswith('I'): merBucket = [[]]
+    return merBucket
+
+
+# https://rest.ensembl.org/documentation/info/lookup
+def grabEnsemblTranscriptTable(EnsTID):
+    server = "https://rest.ensembl.org"
+    ext = "/lookup/id/{0}?expand=1".format(EnsTID)     
+    r = requests.get(server+ext, headers={ "Content-Type" : "application/json"})     
+    decoded = r.json()
+    try: translationStartIndex = decoded['Translation']['start']
+    except KeyError: print('{0} is not translatable'.format(EnsTID)) # might be invalid transcriptID or they don't have tranStartIndex(don't encode protein)
+    else: return translationStartIndex
+# for except branch, we don't specify return command, so it will return NoneType   
 
 def toFasta(list_,N):
     with open('./resultMHC/queryNetMHC_{0}.fa'.format(N),'w') as file1:
@@ -592,16 +945,15 @@ def toFasta(list_,N):
 
 
 if __name__ == "__main__":
-    # load necessary input files
-    from time import process_time
+
     startTime = process_time()
-    df = pd.read_csv('PSI.AML__U2AF1-CV_vs_Healthy__U2AF1-CV.txt',sep='\t') 
+    df = pd.read_csv('PSI.R1-V6.MergedResult.MergedFiles.2_vs_Others.txt',sep='\t') 
     df_exonlist = pd.read_csv('mRNA-ExonIDs.txt',sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
     dict_exonCoords = exonCoords_to_dict('Hs_Ensembl_exon.txt','\t')
     dict_fa = fasta_to_dict('Hs_gene-seq-2000_flank.fa')
     metaBaml = Meta(df) #Instantiate Meta object
     dfNeoJunction = neoJunctions(metaBaml.df)
-    NeoJBaml = NeoJ(dfNeoJunction,11) #Instantiate NeoJ object
+    NeoJBaml = NeoJ(dfNeoJunction,9) #Instantiate NeoJ object
     NeoJBaml.retrieveJunctionSite()
     NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
     NeoJBaml.getORF()
@@ -609,45 +961,25 @@ if __name__ == "__main__":
     NeoJBaml.phaseTranslateJunction()
     NeoJBaml.getNmer()
     
-    dictExonList = GTEx.convertExonList(df_exonlist)  
-    dictGTEx = GTEx.backgroundGTEx(NeoJBaml.mer)
+    dictExonList = convertExonList(df_exonlist)  
+    #dictGTEx = backgroundGTEx(NeoJBaml.mer,dict_fa,dictExonList,dict_exonCoords)
     
-    NeoJBaml.getFinalMers()
+    #NeoJBaml.getFinalMers()
     NeoJBaml.mannual()
-    NeoJBaml.collectNeoAntigen()
-    toFasta(NeoJBaml.mhcNeoAntigens,NeoJBaml.mer)
+    #NeoJBaml.collectNeoAntigen()
+    #toFasta(NeoJBaml.mhcNeoAntigens,NeoJBaml.mer)
     
     
     NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))
-    print(len(NeoJBaml.mhcNeoAntigens))
+    #print(len(NeoJBaml.mhcNeoAntigens))
     
 
 
 
-#list1 = ['QSYLRMEQS', 'MEQSQPLGN', 'SYLRMEQSQ', 'RMEQSQPLG', 'LRMEQSQPL', 'YLRMEQSQP', 'EQSQPLGNK']
-#list2 = ['HLDNTIQSV', 'HHLDNTIQS', 'DNTIQSVFC', 'KTHHLDNTI', 'LSKTHHLDN', 'SKTHHLDNT', 'THHLDNTIQ', 'LDNTIQSVF', 'HLSKTHHLD']
-#list3 = ['RRVELLRSS', 'LLRSSGDIV', 'DRRVELLRS', 'VELLRSSGD', 'RVELLRSSG', 'ELLRSSGDI', 'LRSSGDIVM', 'GDRRVELLR', 'RSSGDIVMT']
-#list4 = ['MWILRTSSS', 'LRTSSSWEM', 'SCMWILRTS', 'CMWILRTSS', 'RTSSSWEMC', 'ILRTSSSWE', 'WILRTSSSW']
-#list5 = ['DNFLLTMVA', 'FLLTMVAEF', 'TMVAEFWRL', 'QDNFLLTMV', 'SGQDNFLLT', 'NFLLTMVAE', 'GQDNFLLTM', 'LLTMVAEFW', 'LTMVAEFWR']
-#list6 = ['NLHWLHKIG', 'GLVVILAST', 'ALCHIAVGQ', 'HWLHKIGLV', 'LHWLHKIGL', 'KIGLVVILA', 'ILASTVVAM', 'QQMNLHWLH', 'LHKIGLVVI', 'HIAVGQQMN', 'LCHIAVGQQ', 'IAVGQQMNL', 'VVILASTVV', 'IGLVVILAS', 'AVGQQMNLH', 'GQQMNLHWL', 'QMNLHWLHK', 'WLHKIGLVV', 'HKIGLVVIL', 'VGQQMNLHW', 'VLALCHIAV', 'LALCHIAVG', 'MNLHWLHKI', 'CHIAVGQQM', 'VILASTVVA', 'LVVILASTV']
-#list7 = ['DCSARMKSS', 'RGQLDCSAR', 'KTCLGLPRR', 'CLGLPRRGQ', 'LDCSARMKS', 'FILKTCLGL', 'GLPRRGQLD', 'RRGQLDCSA', 'PRRGQLDCS', 'LPRRGQLDC', 'RMKSSFTEK', 'QLDCSARMK', 'FTEKRGQYW', 'LKTCLGLPR', 'ILKTCLGLP', 'TCLGLPRRG', 'TEKRGQYWD', 'RNFILKTCL', 'SSFTEKRGQ', 'KRGQYWDHL', 'GQLDCSARM', 'MKSSFTEKR', 'SFTEKRGQY', 'CSARMKSSF', 'ARMKSSFTE', 'KSSFTEKRG', 'SARMKSSFT', 'EKRGQYWDH', 'LGLPRRGQL', 'NFILKTCLG']
-#list8 = ['GSVGHGSPG', 'RRGSVGHGS', 'RGSVGHGSP', 'ERRGSVGHG', 'PERRGSVGH', 'VPERRGSVG', 'LVPERRGSV']
-#list9 = ['SKLQESFQG', 'IGMGKILLG', 'GDVAVTQGR', 'ATVEASPPF', 'MGKILLGSG', 'VTIGGFAKL', 'KVTIGGFAK', 'GMGKILLGS', 'YWACAVDPA', 'QLQEPVGTK', 'PVGTKPERK', 'PLDCSGPVC', 'TIGGFAKLD', 'PRYDPDSGH', 'LTGRDGPTA', 'GASSNAGLT', 'ICLDYERGR', 'GRVSFLDAV', 'GLLECPLDC', 'GAPDVISPR', 'EASPPFAFL', 'LQEPVGTKP', 'VGVGLESKL', 'DYERGRVSF', 'SYLVKVGVG', 'AVSFRGLLE', 'CPLDCSGPV', 'LGSGASSNA', 'GPVCPAFCF', 'FCFIGGGAV', 'GHDSGAEDA', 'PAFCFIGGG', 'VEASPPFAF', 'SGHDSGAED', 'GPTAGCTVP', 'AEDATVEAS', 'GGAVQLQEP', 'CSGPVCPAF', 'DPASYLVKV', 'VQLQEPVGT', 'VGLESKLQE', 'APDVISPRY', 'QESFQGAPD', 'VKVGVGLES', 'PASYLVKVG', 'ESFQGAPDV', 'GRSYWACAV', 'GLTGRDGPT', 'DCSGPVCPA', 'SFLDAVSFR', 'GTKPERKVT', 'PDSGHDSGA', 'AGLTGRDGP', 'ISPRYDPDS', 'VSFLDAVSF', 'RGLLECPLD', 'VDPASYLVK', 'QGAPDVISP', 'NAGLTGRDG', 'CLDYERGRV', 'VGTKPERKV', 'PPRLGICLD', 'RSYWACAVD', 'YLVKVGVGL', 'ECPLDCSGP', 'ERKVTIGGF', 'YERGRVSFL', 'RGRVSFLDA', 'QEPVGTKPE', 'ILLGSGASS', 'AVQLQEPVG', 'CPAFCFIGG', 'ACAVDPASY', 'ASYLVKVGV', 'LPPRLGICL', 'TIGMGKILL', 'GICLDYERG', 'SYWACAVDP', 'LQESFQGAP', 'PDVISPRYD', 'GAEDATVEA', 'GVGLESKLQ', 'DATVEASPP', 'SPRYDPDSG', 'LVKVGVGLE', 'VAVTQGRSY', 'LESKLQESF', 'FLTIGMGKI', 'PLPPRLGIC', 'DVISPRYDP', 'LDCSGPVCP', 'LDYERGRVS', 'ERGRVSFLD', 'DAVSFRGLL', 'AGCTVPLPP', 'SGAEDATVE', 'RLGICLDYE', 'GAVQLQEPV', 'LLECPLDCS', 'AFCFIGGGA', 'FAFLTIGMG', 'SFRGLLECP', 'TVEASPPFA', 'QGRSYWACA', 'LECPLDCSG', 'ASSNAGLTG', 'RYDPDSGHD', 'GGGAVQLQE', 'SPPFAFLTI', 'AFLTIGMGK', 'SSNAGLTGR', 'DVAVTQGRS', 'SFQGAPDVI', 'GRDGPTAGC', 'PERKVTIGG', 'GSGASSNAG', 'DGPTAGCTV', 'DSGAEDATV', 'WACAVDPAS', 'VISPRYDPD', 'LLGSGASSN', 'SNAGLTGRD', 'PPFAFLTIG', 'VSFRGLLEC', 'DPDSGHDSG', 'GCTVPLPPR', 'TQGRSYWAC', 'FLDAVSFRG', 'VCPAFCFIG', 'RVSFLDAVS', 'PRLGICLDY', 'PVCPAFCFI', 'IGGGAVQLQ', 'YDPDSGHDS', 'EDATVEASP', 'CTVPLPPRL', 'PFAFLTIGM', 'KILLGSGAS', 'PTAGCTVPL', 'GLESKLQES', 'ESKLQESFQ', 'TKPERKVTI', 'GKILLGSGA', 'TGRDGPTAG', 'KLQESFQGA', 'KVGVGLESK', 'SGASSNAGL', 'ASPPFAFLT', 'TVPLPPRLG', 'HDSGAEDAT', 'AVDPASYLV', 'VTQGRSYWA', 'LTIGMGKIL', 'EPVGTKPER', 'KPERKVTIG', 'FQGAPDVIS', 'FIGGGAVQL', 'AVTQGRSYW', 'LDAVSFRGL', 'FRGLLECPL', 'LGICLDYER', 'CAVDPASYL', 'SGPVCPAFC', 'RDGPTAGCT', 'VPLPPRLGI', 'CFIGGGAVQ', 'TAGCTVPLP', 'RKVTIGGFA', 'DSGHDSGAE']
-#list10 = ['TISSFFLNS', 'EGAFVYLFL', 'VTEGAFVYL', 'TEGAFVYLF', 'LNSVTEGAF', 'SVTEGAFVY', 'SSFFLNSVT', 'ISSFFLNSV', 'FTHTISSFF', 'HTISSFFLN', 'NSVTEGAFV', 'SFTHTISSF', 'THTISSFFL', 'FLNSVTEGA', 'AFVYLFLGN', 'YLFLGNLLR', 'SFFLNSVTE', 'GESFTHTIS', 'AAGESFTHT', 'VYLFLGNLL', 'AGESFTHTI', 'GAFVYLFLG', 'FVYLFLGNL', 'ESFTHTISS', 'LFLGNLLRH', 'FFLNSVTEG']
-#list11 = ['SGATRPYLP', 'GPQWLLRTD', 'CCPECPSGA', 'PYLPGPQWL', 'VPCCPECPS', 'PSGATRPYL', 'GATRPYLPG', 'CPECPSGAT', 'TRPYLPGPQ', 'GLVPCCPEC', 'LVPCCPECP', 'RPYLPGPQW', 'PRELGLVPC', 'PECPSGATR', 'LGLVPCCPE', 'ELGLVPCCP', 'ECPSGATRP', 'ATRPYLPGP', 'YLPGPQWLL', 'PGPQWLLRT', 'PCCPECPSG', 'RELGLVPCC', 'LPGPQWLLR', 'CPSGATRPY']
-#list12 = ['QTPTVYALP', 'PLDWEQTPT', 'WEQTPTVYA', 'RGSGLEATG', 'NLKPRGSGL', 'ATGGLSDPW', 'SLVLQPEPL', 'EATGGLSDP', 'PRGSGLEAT', 'NSDTNLKPR', 'PTVYALPSP', 'GLSDPWASC', 'GGLSDPWAS', 'CQSLVLQPE', 'DWEQTPTVY', 'PWASCQSLV', 'DPWASCQSL', 'LKPRGSGLE', 'SGLEATGGL', 'LEATGGLSD', 'LVLQPEPLD', 'QSLVLQPEP', 'EPLDWEQTP', 'EQTPTVYAL', 'GSGLEATGG', 'GLEATGGLS', 'LQPEPLDWE', 'SDTNLKPRG', 'WASCQSLVL', 'DTNLKPRGS', 'LDWEQTPTV', 'TGGLSDPWA', 'TNLKPRGSG', 'VLQPEPLDW', 'YALPSPVPT', 'TVYALPSPV', 'TPTVYALPS', 'QPEPLDWEQ', 'ASCQSLVLQ', 'KPRGSGLEA', 'SDPWASCQS', 'LSDPWASCQ', 'SCQSLVLQP', 'VYALPSPVP', 'PEPLDWEQT']
-#list13 = ['HNRYSGAWA', 'AAKQLHNRY', 'QLHNRYSGA', 'RYSGAWAPR', 'LHNRYSGAW', 'KQLHNRYSG', 'SGAWAPRGA', 'AWAPRGAGT', 'APRGAGTSW', 'QAAKQLHNR', 'WAPRGAGTS', 'YSGAWAPRG', 'PRGAGTSWM', 'GAWAPRGAG', 'NRYSGAWAP', 'AKQLHNRYS']
-#list14 = ['SLLLAQGSA', 'GSFLLPTPQ', 'LPHPSAPGS', 'GSALGEETL', 'LGEETLPHP', 'QSLRSCTNR', 'SLRSCTNRP', 'LLAQGSALG', 'RSCTNRPSI', 'GFSLFSALF', 'ETLPHPSAP', 'LFFRFIFSL', 'LLLAQGSAL', 'ISFGFSLFS', 'SGSFLLPTP', 'SFLLPTPQS', 'LAQGSALGE', 'CTNRPSISF', 'TNRPSISFG', 'CDGSLLLAQ', 'AQGSALGEE', 'GSLLLAQGS', 'QSQSLRSCT', 'FGFSLFSAL', 'ALFFRFIFS', 'PSAPGSGSF', 'PHPSAPGSG', 'SQSLRSCTN', 'LLPTPQSQS', 'GCDGSLLLA', 'SFGFSLFSA', 'EETLPHPSA', 'APGSGSFLL', 'SAPGSGSFL', 'SCTNRPSIS', 'FLLPTPQSQ', 'DGSLLLAQG', 'PSISFGFSL', 'QGSALGEET', 'GEETLPHPS', 'GSGSFLLPT', 'PQSQSLRSC', 'SALGEETLP', 'HPSAPGSGS', 'RPSISFGFS', 'SLFSALFFR', 'TPQSQSLRS', 'ALGEETLPH', 'SALFFRFIF', 'FSALFFRFI', 'LRSCTNRPS', 'PGSGSFLLP', 'PTPQSQSLR', 'LPTPQSQSL', 'FSLFSALFF', 'TLPHPSAPG', 'SISFGFSLF', 'NRPSISFGF', 'LFSALFFRF']
-#
-#
-#list_ = []
-#for i in range(12,15):
-#    list_ += eval('list{0}'.format(i))
-#print(len(list_))
-#toFasta(list_)
+
     
     
     
@@ -664,4 +996,7 @@ if __name__ == "__main__":
     
     
     
+
+
+
 

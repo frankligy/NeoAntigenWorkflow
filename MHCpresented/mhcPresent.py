@@ -245,6 +245,97 @@ class NeoJ(Meta):
         for i in whole:
             if not i in filterBucket: list_ += i
         self.mhcNeoAntigens = list(set(list_))
+    
+    def netMHCresult(self,HLA,pathSoftWare,sb=0.5,wb=2.0):
+        col = []
+        for i in range(self.df.shape[0]):
+            merList = self.df['{0}mer'.format(self.mer)].tolist()[i]
+            if merList == ['MANUUAL']: merList = self.df['mannual'].tolist()[i]
+            netMHCpan.pepFile(merList) # get query.pep file
+            machine = netMHCpan('./query.pep',HLA,pathSoftWare,self.mer,sb,wb)
+            machine.runSoftWare()
+            dic = machine.postFile()
+            col.append(dic)
+        self.df['MHCresult']=col
+            
+
+class netMHCpan():
+    # ../netMHCpan -p test.pep -BA -xls -a HLA-A01:01,HLA-A02:01 -xlsfile my_NetMHCpan_out.xls
+    def __init__(self,intFile,HLA,pathSoftWare,length,sb=0.5,wb=2.0):
+        self.intFile=intFile
+        self.HLA=HLA
+        self.pathSoftWare=pathSoftWare
+        self.sb = sb    # float, 0.5
+        self.wb = wb    # float, 2.0
+        self.length = length
+        self.filter = wb  # float, 2.0
+    
+    @staticmethod
+    def pepFile(lis):
+        result = []
+        [result.extend(item) for item in lis if isinstance(item,list)]
+        result = list(set(result))
+        with open('query.pep','w') as f1:
+            [f1.write('{}\n'.format(mer)) for mer in result]
+        # now we have query.pep file
+    
+                
+    
+    def runSoftWare(self):
+        import subprocess
+        with open('./result.txt','w') as f2:
+            subprocess.run([self.pathSoftWare,'-p',self.intFile, '-BA','-a',self.HLA,'-rth', str(self.sb), '-rlt', str(self.wb), '-l',str(self.length),'-t',str(self.wb)],stdout=f2)        
+       # will generate a result file  
+    
+    def postFile(self):
+        # HLA = 'HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01'
+        with open('./result.txt','r') as f1, open('./result_parse.txt','w') as f2:
+            for line in f1:
+                if line.startswith('#') or line.startswith('-') or line.strip('\n') == '': continue
+                elif re.search(r'^\w+',line): continue
+                elif re.search(r'Pos',line): continue
+                else: f2.write(line)
+        try:df = pd.read_csv('./result_parse.txt',sep='\s+', header=None,index_col=0)  
+        except pd.errors.EmptyDataError: dic = 'No candidates'   
+        else:
+            hlaAllele = df[1].tolist()  # HLA Allele
+            mer = df[2].tolist()   # kmer amino acid
+            level = df[17].tolist()  # SB or WB
+            hla = self.HLA
+            
+            hlaList = hla.split(',')
+            hlaNum = len(hlaList) 
+            dic = {}   # store all the candidates with binding affinity
+            for i in range(hlaNum):
+                sb,wb=[],[]   # all strong binding neoantigen, all weak binding neoantigen
+                hlaQuery = netMHCpan.hlaType(hlaList[i])  # HLA-A01:01 to HLA-A*01:01
+                occurence = [k for k in range(len(hlaAllele)) if hlaAllele[k] == hlaQuery]
+                [sb.append(mer[j]) if level[j]=='SB' else wb.append(mer[j]) for j in occurence]
+                dic[hlaList[i]] = (sb,wb)
+            self.neoantigen = dic
+        return dic
+
+        
+            
+            
+            
+            
+            
+            
+    @staticmethod
+    def hlaType(hla):   # convert HLA-A01:01 to HLA-A*01:01
+        index1 = re.search(r'^HLA-[A-Z]+',hla).span()[1]   # here, index will be 5, which is '0'
+        former,latter = hla[0:index1],hla[index1:]
+        hlaNew = former + '*' + latter
+        return hlaNew
+            
+
+        
+
+
+
+    
+
         
 def novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,N): # E25.1-E26.1
     latter = event.split('-')[1]  # E26.1
@@ -968,6 +1059,9 @@ if __name__ == "__main__":
     NeoJBaml.mannual()
     #NeoJBaml.collectNeoAntigen()
     #toFasta(NeoJBaml.mhcNeoAntigens,NeoJBaml.mer)
+    
+    NeoJBaml.netMHCresult('HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01',
+                          '/Users/ligk2e/Downloads/netMHCpan-4.1/netMHCpan')
     
     
     NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)

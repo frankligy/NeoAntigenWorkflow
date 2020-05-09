@@ -7,7 +7,7 @@ Created on Mon Mar 30 17:32:27 2020
 """
 
 import os
-os.chdir('/Users/ligk2e/Desktop/project_breast/R1-V6/')
+os.chdir('/Users/ligk2e/Desktop/project_LUAD/')
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
@@ -31,6 +31,54 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
     def __repr__(self):
         return {'df':self.df}
     
+    def getPercent(self,dfgroup,dfori,name,write=False):
+        dic = {}
+        for i in range(dfgroup.shape[0]):
+            id_, label = dfgroup['TCGA-ID'].tolist()[i],dfgroup['label'].tolist()[i]
+            if label == 'R1-V7':
+                try: dic['R1-V7'].append(id_)
+                except KeyError:
+                    dic['R1-V7'] = []
+                    dic['R1-V7'].append(id_)
+            elif label == 'Healthy':
+                try: dic['Healthy'].append(id_)
+                except KeyError:
+                    dic['Healthy'] = []
+                    dic['Healthy'].append(id_)
+        
+        num_t = len(dic['R1-V7'])
+        num_h = len(dic['Healthy'])
+ 
+        percentArray_h = [] 
+        percentArray_t = [] 
+        dicPercent = {}        
+        for j in range(dfori.shape[0]):
+            event = dfori['UID'].tolist()[j]    # second 'UID' was converted to 'UID.1'
+            
+            allvalue_t = dfori.iloc[j][dic['R1-V7']].tolist()
+            truth_t = [True if item == 0 else False for item in allvalue_t]
+            allzero_t = sum(truth_t)   # how many zeros in this cluster
+            percent_t = allzero_t/num_t  # percentage of zeros
+            percentArray_t.append(percent_t)
+                
+            #allvalue = dfori[dic['R1-V7']].iloc[j].tolist()
+            allvalue_h = dfori.iloc[j][dic['Healthy']].tolist()
+            truth_h = [True if item == 0 else False for item in allvalue_h]
+            allzero_h = sum(truth_h)   # how many zeros in this cluster
+            percent_h = allzero_h/num_h   # percentage of zeros
+            percentArray_h.append(percent_h)
+            dicPercent[event]=(percent_t,percent_h)
+            
+        col0,col1 = [],[]
+        for k in range(self.df.shape[0]):
+            splice = self.df['UID'].tolist()[k]
+            per_t,per_h = dicPercent[splice][0],dicPercent[splice][1]
+            col0.append(per_t)
+            col1.append(per_h)
+        self.df['tumor_zero_percent'] = col0
+        self.df['healthy_zero_percent'] = col1
+        if write==True: self.df.to_csv('see{0}.txt'.format(name),sep='\t',index=None)
+            
     def retrieveJunctionSite(self):
         exam_seq,back_seq = [],[]
         for i in range(self.df.shape[0]):
@@ -142,7 +190,7 @@ class NeoJ(Meta):
                             front=0 if former - ((N-1)*3) < 0 else former - (N-1)*3
                             
                             junctionSlice = junction[front: former + ((N-1)*3)].replace(',','')
-                            print(junctionSlice)
+                            #print(junctionSlice)
                         elif phase == 1: 
                             front=0 if former - ((N-1)*3+1) <0 else former - ((N-1)*3+1)
                             junctionSlice = junction[front: former + ((N-1)*3+2)].replace(',','')
@@ -153,7 +201,7 @@ class NeoJ(Meta):
                  
             
                         peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                        print(peptide)
+                        #print(peptide)
                     
                         
                         
@@ -208,7 +256,12 @@ class NeoJ(Meta):
                 else: event = str(x[0].split(':')[2])+':'+str(x[0].split(':')[3])     # E22-ENSG:E31  
                 try: x[1].split(':')[2]
                 except IndexError: backEvent = x[1].split(':')[1]
-                else: backEvent = x[1].split(':')[2]                         
+                else: backEvent = x[1].split(':')[2]   
+                if 'ENSG' in event:  # E4.3--ENSG00000267881:E2.1
+                    # nearly the same as newSpliicng, query is former subexon, trailing is replaced as breaking point(start coordinate of former subexon + length of former part - 1)
+                    merArray = tranSplicing(event,EnsGID,junction,self.mer,dictExonList,dict_exonCoords)
+                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
+                    if merArray == [[]]: merArray = ['transplicing, already checked, query subexon not present in known transcript']
                 if re.search(r'I.+_\d+',event) or 'U' in event:  # they belong to NewExon type: including UTR type and blank type(the annotation is blank)
                 # for NewExon type, no need to infer translation phase, just use junction sequence, mer should span junction site
                     junctionIndex = junction.find(',')
@@ -216,19 +269,22 @@ class NeoJ(Meta):
                     junctionSlice = junction[junctionIndex-((Nminus1*3)-1):junctionIndex+(Nminus1*3)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
                     merArray = dna2aa2mer(junctionSlice,self.mer)   # merArray is a nested list
                     if check == True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
-                if re.search(r'E\d+\.\d+_\d+',event) or 'ENSG' in event:  # they belong to newSplicing site or fusion gene
+                if re.search(r'E\d+\.\d+_\d+',event):  # they belong to newSplicing site or fusion gene
                 # for this type, just check if the former part (E1.2-E3.4, here E1.2 is former part) exist in known transcript, then infer the phase of translation
-                    print(event)
+                    #print(event)
                     merArray = newSplicingSite(event,EnsGID,junction,self.mer,dictExonList,dict_exonCoords)   # nested list
                     if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
-                    if merArray == [[]]: merArray = ['newSplicing or fusion gene, already checked, query subexon not present in known transcript']
+                    if merArray == [[]]: merArray = ['newSplicing, already checked, query subexon not present in known transcript']
+                
+                    
+                    
                 if re.search(r'^I\d+\.\d+-',event) or re.search(r'-I\d+\.\d+$',event):
                     merTumor = intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
                     if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray == [[]]: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
                 if re.search(r'E\d+\.\d+-E\d+\.\d+$',event):   # novel splicing: CLASP1:ENSG00000074054:E25.1-E26.1, just don't match with any existing one
                     # here we extract the backEvent, which is E24.1-E27.1
-                    print(event)
+                    #print(event)
                     backEvent = backEvent.replace('-','|')  # now it is E24.1|E27.1
                     merArray = novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,self.mer)
                     if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
@@ -246,22 +302,22 @@ class NeoJ(Meta):
             if not i in filterBucket: list_ += i
         self.mhcNeoAntigens = list(set(list_))
     
-    def netMHCresult(self,HLA,pathSoftWare,sb=0.5,wb=2.0):
+    def netMHCresult(self,HLA,pathSoftWare,mode,sb=0.5,wb=2.0):
         col = []
         for i in range(self.df.shape[0]):
             merList = self.df['{0}mer'.format(self.mer)].tolist()[i]
             if merList == ['MANUUAL']: merList = self.df['mannual'].tolist()[i]
             netMHCpan.pepFile(merList) # get query.pep file
-            machine = netMHCpan('./query.pep',HLA,pathSoftWare,self.mer,sb,wb)
-            machine.runSoftWare()
-            dic = machine.postFile()
+            machine = netMHCpan('./query.pep',HLA,pathSoftWare,self.mer,mode,sb,wb)
+            dic = machine.seperator()
+
             col.append(dic)
         self.df['MHCresult']=col
             
 
 class netMHCpan():
     # ../netMHCpan -p test.pep -BA -xls -a HLA-A01:01,HLA-A02:01 -xlsfile my_NetMHCpan_out.xls
-    def __init__(self,intFile,HLA,pathSoftWare,length,sb=0.5,wb=2.0):
+    def __init__(self,intFile,HLA,pathSoftWare,length,mode,sb=0.5,wb=2.0):
         self.intFile=intFile
         self.HLA=HLA
         self.pathSoftWare=pathSoftWare
@@ -269,6 +325,7 @@ class netMHCpan():
         self.wb = wb    # float, 2.0
         self.length = length
         self.filter = wb  # float, 2.0
+        self.mode=mode
     
     @staticmethod
     def pepFile(lis):
@@ -279,23 +336,68 @@ class netMHCpan():
             [f1.write('{}\n'.format(mer)) for mer in result]
         # now we have query.pep file
     
-                
+    def seperator(self):
+        if self.mode=='MHCI': 
+            self.runSoftWareI()
+            dic = self.postFileI()
+            return dic
+        elif self.mode=='MHCII':
+            self.runSoftWareII()
+            dic = self.postFileII()
+            return dic 
+            
+
     
-    def runSoftWare(self):
+    def runSoftWareI(self):
         import subprocess
-        with open('./result.txt','w') as f2:
-            subprocess.run([self.pathSoftWare,'-p',self.intFile, '-BA','-a',self.HLA,'-rth', str(self.sb), '-rlt', str(self.wb), '-l',str(self.length),'-t',str(self.wb)],stdout=f2)        
+        with open('./resultI.txt','w') as f3:
+            subprocess.run([self.pathSoftWare,'-p',self.intFile, '-BA','-a',self.HLA,'-rth', str(self.sb), '-rlt', str(self.wb), '-l',str(self.length),'-t',str(self.wb)],stdout=f3)        
        # will generate a result file  
     
-    def postFile(self):
+    def runSoftWareII(self):
+        import subprocess
+        with open('./resultII.txt','w') as f4:
+            subprocess.run([self.pathSoftWare,'-f',self.intFile,'-inptype', '1', '-a',self.HLA,'-length',str(self.length)],stdout=f4)
+    
+    def postFileII(self):
+        with open('./resultII.txt','r') as f5,open('./resultII_parse.txt','w') as f6:
+            for line in f5:
+                if line.startswith('#') or line.startswith('-') or line.strip('\n') == '':continue
+                elif re.search(r'^\w+',line): continue
+                elif re.search(r'Pos',line): continue
+                else: f6.write(line)
+        try:df=pd.read_csv('./resultII_parse.txt',sep='\s+',header=None,index_col=0,names=[str(i+1) for i in range(11)])
+        except pd.errors.EmptyDataError: dic = 'No candidates'
+        else:
+            hlaAllele = df['2'].tolist()  # HLA Allele
+            mer = df['3'].tolist()   # kmer amino acid
+            level = df['11'].tolist()  # <=SB or <=WB
+            hla = self.HLA
+    
+            hlaList = hla.split(',')
+            hlaNum = len(hlaList) 
+            dic = {}   # store all the candidates with binding affinity
+            for i in range(hlaNum):
+                sb,wb=[],[]   # all strong binding neoantigen, all weak binding neoantigen
+                hlaQuery = hlaList[i]
+                occurence = [k for k in range(len(hlaAllele)) if hlaAllele[k] == hlaQuery]
+                for j in occurence:
+                    if level[j]=='<=SB': sb.append(mer[j])
+                    elif level[j]=='<=WB':wb.append(mer[j])
+                dic[hlaList[i]] = (sb,wb)
+            self.neoantigen = dic
+        return dic   
+    
+    
+    def postFileI(self):
         # HLA = 'HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01'
-        with open('./result.txt','r') as f1, open('./result_parse.txt','w') as f2:
+        with open('./resultI.txt','r') as f1, open('./resultI_parse.txt','w') as f2:
             for line in f1:
                 if line.startswith('#') or line.startswith('-') or line.strip('\n') == '': continue
                 elif re.search(r'^\w+',line): continue
                 elif re.search(r'Pos',line): continue
                 else: f2.write(line)
-        try:df = pd.read_csv('./result_parse.txt',sep='\s+', header=None,index_col=0)  
+        try:df = pd.read_csv('./resultI_parse.txt',sep='\s+', header=None,index_col=0)  
         except pd.errors.EmptyDataError: dic = 'No candidates'   
         else:
             hlaAllele = df[1].tolist()  # HLA Allele
@@ -315,8 +417,7 @@ class netMHCpan():
             self.neoantigen = dic
         return dic
 
-        
-            
+
             
             
             
@@ -380,13 +481,56 @@ def novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,N)
            
     return merBucket
                             
-                    
+def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-ENSG00000267881:E2.1
+    query = event.split('-')[0]
+    formerLength = len(junction.split(',')[0])
+    merBucket = []
+    attrs = dict_exonCoords[EnsGID][query]
+    strand = attrs[1]
+    start = attrs[2]
+    breaking = int(start)+formerLength-1
+    allTranDict = dictExonList[EnsGID]
+    for tran,exonlist in allTranDict.items():
+        if query in exonlist: 
+            try:tranStartIndex = grabEnsemblTranscriptTable(tran)
+            except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
+            else:
+                if type(tranStartIndex) == int:
+                    if strand == '+':
+                        remainder = (int(breaking) - tranStartIndex) % 3   
+                        if remainder == 0: 
+                            front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                            junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                        elif remainder == 1: 
+                            front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                            junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                        elif remainder == 2: 
+                            front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                            junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+                    elif strand == '-':
+
+                        remainder = (tranStartIndex - int(breaking)) % 3 
+                        if remainder == 0: 
+                            front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                            junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                        elif remainder == 1: 
+                            front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                            junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                        elif remainder == 2: 
+                            front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                            junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+            
+                    peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                    merArray = extractNmer(peptide,N) 
+                    merBucket.append(merArray)
+    if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
 
 def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # one stop solution for newSplicingSite type
+    print(event)
     try: event.split('-')[0].split('_')[1]   # see if the former one has trailing part E1.2_8483494
     except IndexError: 
         former = event.split('-')[0]  # no trailing part, former part just E1.2, means newSplicingSite is in latter part
-        query = event.split('-')[1].split('_')[0]
+        query = former
         trailing = event.split('-')[1].split('_')[1]
     else: 
         query = event.split('-')[0].split('_')[0]  # has trailing part, former part should get rid of trailing part
@@ -662,8 +806,8 @@ def check_exonlist_general(exonlist,index,strand):
         if str(query_subexon_num + 1) in dict[query_exon_num]: return False
         else: return True
         
-def neoJunctions(df):
-    dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df['avg-Others'] <= 0.23))]
+def neoJunctions(df,colname):
+    dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df[colname] <= 0.23))]
     return dfNeoJunction  
     
 def uid(df, i):
@@ -988,25 +1132,25 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
                             # if 2, means the first nt in intron will be the third nt in codon triplet.
                             if remainder == 0: 
                                 front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                                junctionSlice = junction[front:].replace(',','')
                             elif remainder == 1: 
                                 front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                                junctionSlice = junction[front:].replace(',','')
                             elif remainder == 2: 
                                 front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+1)].replace(',','')
+                                junctionSlice = junction[front:].replace(',','')
                         elif strand == '-':
                             intronStartIndex = int(attrs[3]) - 1
                             remainder = (tranStartIndex - intronStartIndex) % 3 
                             if remainder == 0: 
                                 front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                                junctionSlice = junction[front:].replace(',','')
                             elif remainder == 1: 
                                 front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                                junctionSlice = junction[front:].replace(',','')
                             elif remainder == 2: 
                                 front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+1)].replace(',','')
+                                junctionSlice = junction[front:].replace(',','')
                 
                         peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
                         merArray = extractNmer(peptide,N) 
@@ -1038,13 +1182,16 @@ def toFasta(list_,N):
 if __name__ == "__main__":
 
     startTime = process_time()
-    df = pd.read_csv('PSI.R1-V6.MergedResult.MergedFiles.2_vs_Others.txt',sep='\t') 
+    df = pd.read_csv('PSI.R1-V7_vs_Healthy.txt',sep='\t') 
     df_exonlist = pd.read_csv('mRNA-ExonIDs.txt',sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
     dict_exonCoords = exonCoords_to_dict('Hs_Ensembl_exon.txt','\t')
     dict_fa = fasta_to_dict('Hs_gene-seq-2000_flank.fa')
+    dfori = pd.read_csv('LUAD_Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation-filtered-75p.txt',sep='\t')
+    dfgroup = pd.read_csv('groups.txt',sep='\t',header=None,names=['TCGA-ID','group','label'])
     metaBaml = Meta(df) #Instantiate Meta object
-    dfNeoJunction = neoJunctions(metaBaml.df)
+    dfNeoJunction = neoJunctions(metaBaml.df,'avg-Healthy')
     NeoJBaml = NeoJ(dfNeoJunction,9) #Instantiate NeoJ object
+    NeoJBaml.getPercent(dfgroup,dfori,'LUAD_Neo',write=True)
     NeoJBaml.retrieveJunctionSite()
     NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
     NeoJBaml.getORF()
@@ -1061,8 +1208,8 @@ if __name__ == "__main__":
     #toFasta(NeoJBaml.mhcNeoAntigens,NeoJBaml.mer)
     
     NeoJBaml.netMHCresult('HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01',
-                          '/Users/ligk2e/Downloads/netMHCpan-4.1/netMHCpan')
-    
+                          '/Users/ligk2e/Downloads/netMHCpan-4.1/netMHCpan','MHCI')
+#    NeoJBaml.netMHCresult('DRB1_0101,DRB1_1603','/Users/ligk2e/Downloads/netMHCIIpan-4.0/netMHCIIpan','MHCII') 
     
     NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)
     

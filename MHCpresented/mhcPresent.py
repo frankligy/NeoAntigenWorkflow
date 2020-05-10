@@ -53,30 +53,34 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
         percentArray_t = [] 
         dicPercent = {}        
         for j in range(dfori.shape[0]):
-            event = dfori['UID'].tolist()[j]    # second 'UID' was converted to 'UID.1'
+            event = dfori['UID'].tolist()[j]    # next 'UID' was converted to 'UID.1'
             
-            allvalue_t = dfori.iloc[j][dic['R1-V7']].tolist()
+            allvalue_t = list(map(lambda x:round(x,2),dfori.iloc[j][dic['R1-V7']].tolist()))
             truth_t = [True if item == 0 else False for item in allvalue_t]
             allzero_t = sum(truth_t)   # how many zeros in this cluster
             percent_t = allzero_t/num_t  # percentage of zeros
             percentArray_t.append(percent_t)
                 
             #allvalue = dfori[dic['R1-V7']].iloc[j].tolist()
-            allvalue_h = dfori.iloc[j][dic['Healthy']].tolist()
+            allvalue_h = list(map(lambda x:round(x,2),dfori.iloc[j][dic['Healthy']].tolist()))
             truth_h = [True if item == 0 else False for item in allvalue_h]
             allzero_h = sum(truth_h)   # how many zeros in this cluster
             percent_h = allzero_h/num_h   # percentage of zeros
             percentArray_h.append(percent_h)
-            dicPercent[event]=(percent_t,percent_h)
+            dicPercent[event]=(percent_t,allvalue_t,percent_h,allvalue_h)
             
-        col0,col1 = [],[]
+        col0,col1,col2,col3 = [],[],[],[]
         for k in range(self.df.shape[0]):
             splice = self.df['UID'].tolist()[k]
-            per_t,per_h = dicPercent[splice][0],dicPercent[splice][1]
+            per_t,all_t,per_h,all_h = dicPercent[splice][0],dicPercent[splice][1],dicPercent[splice][2],dicPercent[splice][3]
             col0.append(per_t)
-            col1.append(per_h)
+            col1.append(all_t)
+            col2.append(per_h)
+            col3.append(all_h)
         self.df['tumor_zero_percent'] = col0
-        self.df['healthy_zero_percent'] = col1
+        self.df['tumor_distribution'] = col1
+        self.df['healthy_zero_percent'] = col2
+        self.df['healthy_distribution'] = col3
         if write==True: self.df.to_csv('see{0}.txt'.format(name),sep='\t',index=None)
             
     def retrieveJunctionSite(self):
@@ -1189,6 +1193,7 @@ if __name__ == "__main__":
     dfori = pd.read_csv('LUAD_Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation-filtered-75p.txt',sep='\t')
     dfgroup = pd.read_csv('groups.txt',sep='\t',header=None,names=['TCGA-ID','group','label'])
     metaBaml = Meta(df) #Instantiate Meta object
+    metaBaml.getPercent(dfgroup,dfori,'LUAD_All',write=True)
     dfNeoJunction = neoJunctions(metaBaml.df,'avg-Healthy')
     NeoJBaml = NeoJ(dfNeoJunction,9) #Instantiate NeoJ object
     NeoJBaml.getPercent(dfgroup,dfori,'LUAD_Neo',write=True)

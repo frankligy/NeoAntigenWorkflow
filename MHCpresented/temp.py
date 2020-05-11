@@ -50,9 +50,13 @@ for j in range(dfori.shape[0]):
     percentArray_h.append(percent_h)
     dicPercent[event]=(percent_t,percent_h)
 
+
+
     
 a = [True if i==1 else False for i in percentArray_h]
-
+truth = pd.Series(a)
+guide = dfori[truth]
+guide.to_csv('feature_EventAnnotation.txt',sep='\t',index=None)
 
 
 dfquery = pd.read_csv('PSI.R1-V7_vs_Healthy.txt',sep='\t')
@@ -144,27 +148,228 @@ with shelve.open('bytefile') as db:
 with open('dicTissueExp.p','rb') as file2:
     dicTissueExp = pickle.load(file2)    
 
-def inspectGTEx(df)    
+
+def inspectGTEx(dicTissueExp,event):
+    tissueExp = dicTissueExp[event]
+    for tissue, expression in tissueExp.items():
+        
+        
+                            
+    
+    
+with bz2.BZ2File('dicSRA.pbz2','wb') as f: 
+    cPickle.dump(dicSRA, f)  
+
+with bz2.BZ2File('dicSRA.pbz2','rb') as f1:
+    data = cPickle.load(f1)    
+
+import multiprocessing    
+manager = multiprocessing.Manager()
+Global = manager.Namespace()
+Global.x = 10
+Global.y = 'hello'
+Global._z = 12.3    # this is an attribute of the proxy
+print(Global)
+Namespace(x=10, y='hello')    
     
     
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+import pandas as pd
+
+sraData = pd.read_csv('GTEx_EventAnnotation.txt',sep='\t')
+
+import pickle
+with open('dicSRA.p','rb') as file1:
+    dicSRA=pickle.load(file1)
+
+dicTissueExp = {}
+semaphore = 0
+
+def search(ns):
+    semaphore = ns.semaphore
+    dicTissueExp = ns.dicTissueExp
+    sraData = ns.sraData
+    dicSRA = ns.dicSRA
+    while semaphore < sraData.shape[0]:
+        print('this is the {0}th run'.format(semaphore))
+        event = sraData['UID'].tolist()[semaphore]
+        for tissue,accID in dicSRA.items():
+            try: dicTissueExp[event][tissue] = sraData.iloc[semaphore][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
+            except KeyError:          
+                dicTissueExp[event] = {}
+                dicTissueExp[event][tissue] = sraData.iloc[semaphore][[accID+'_1.bed' for accID in dicSRA[tissue]]].values 
+        semaphore += 1
+
+def process_task(ns,lock): 
+    for _ in range(sraData.shape[0]//4+1): 
+        lock.acquire() 
+        search(ns)
+        lock.release() 
+
+import multiprocessing
+with multiprocessing.Manager() as manager:
+    ns = manager.Namespace()
+    ns.sraData = sraData
+    ns.dicSRA = dicSRA
+    ns.dicTissueExp = dicTissueExp
+    ns.semaphore = semaphore
 
 
 
+lock = multiprocessing.Lock()
+p1 = multiprocessing.Process(target=process_task,args=(ns,lock,))
+p1.start()
+p1.join()
+p2 = multiprocessing.Process(target=process_task,args=(ns,lock,))
+p2.start()
+p2.join()
+p3 = multiprocessing.Process(target=process_task,args=(ns,lock,))
+p3.start()
+p3.join()
+p4 = multiprocessing.Process(target=process_task,args=(ns,lock,))
+p4.start()
+p4.join()
 
+
+p1.join()
+p2.join()
+p3.join()
+p4.join()
+
+
+
+import bz2
+import _pickle as cpickle
+with bz2.BZ2File('dicTissueExp1.pbz2','wb') as f1:
+    cpickle.dump(dicTissueExp,f1)       
     
+    
+with bz2.BZ2File('dicTissueExp.pbz2','rb') as f2:
+    dicTissueExp = cpickle.load(f2)    
+
+import pickle    
+from time import process_time
+start = process_time()   
+with open('dicTissueExp.p','rb') as f3:
+    dicTissueExp = pickle.load(f3)
+end = process_time()
+print('consume {}s'.format(end-start))
+    
+a = [0,0.1,0.3,0.5,0.0,0.0,0.12]
+fig = plt.figure()
+plt.plot(np.arange(len(a)),a)
+plt.ylim(-0.2,1.0)
+plt.plot(np.arange(len(a)),np.zeros(len(a)),linestyle='dashed')
+
+plt.bar(np.arange(len(a)),a,width=0.5,label='tissue')
+plt.legend()
+
+
+dicTissueExp['TSPAN6:ENSG00000000003:I3.1-E4.1|ENSG00000000003:E3.4-E4.1']['Cells - Cultured fibroblasts']
+inspectGTEx('KYAT3:ENSG00000137944:E4.1-I4.1_88965413|ENSG00000137944:E4.1-E5.1')
+inspectGTEx('NSUN5P2:ENSG00000106133:I2.1-E3.1|ENSG00000106133:E2.1-E3.1')   # inconsistent between GTEx and TCGA
+
+tissue = list(dicSRA.keys())
+
+def inspectGTEx(event,tissue='all',plot=True):
+    flag = 0
+    import warnings
+    warnings.filterwarnings("ignore")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    global dicTissueExp
+    if tissue=='all':
+        tissueExp = dicTissueExp[event]
+        for tis,exp in tissueExp.items():
+            exp = exp.astype('float64')
+            exp=exp[np.logical_not(np.isnan(exp))]
+            if exp.size == 0: print('{0} data incomplete'.format(tis))
+            elif np.any(exp):   # have non-zero element
+                if plot==True:
+                    fig = plt.figure()
+                    plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
+                    plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
+                    plt.legend()
+                    plt.savefig('./figures/{1}.pdf'.format(event,tis),bbox_inches='tight')
+                    plt.close(fig)
+                else: continue
+            else: 
+                flag += 1
+                print('No expression in {}'.format(tis))
+            
+    else:
+        expression = dicTissueExp[event][tissue]
+        exp = expression.astype('float64')
+        exp=exp[np.logical_not(np.isnan(exp))]
+        if exp.size == 0: print('{0} data incomplete'.format(tissue))
+        elif np.any(exp):   # have non-zero element
+            plt.bar(np.arange(len(exp)),exp,width=0.2,label='tissue')
+            plt.legend()
+            plt.savefig('./{}.pdf'.format(tissue),bbox_inches='tight')
+            plt.show()
+            print(expression)
+    return flag  
+        
+"""        
+['Artery - Tibial',
+ 'Adipose - Subcutaneous',
+ 'Breast - Mammary Tissue',
+ 'Heart - Atrial Appendage',
+ 'Uterus',
+ 'Thyroid',
+ 'Adrenal Gland',
+ 'Lung',
+ 'Spleen',
+ 'Brain - Cortex',
+ 'Adipose - Visceral (Omentum)',
+ 'Colon - Sigmoid',
+ 'Skin - Not Sun Exposed (Suprapubic)',
+ 'Small Intestine - Terminal Ileum',
+ 'Whole Blood',
+ 'Esophagus - Gastroesophageal Junction',
+ 'Muscle - Skeletal',
+ 'Cells - Cultured fibroblasts',
+ 'Liver',
+ 'Minor Salivary Gland',
+ 'Skin - Sun Exposed (Lower leg)',
+ 'Stomach',
+ 'Ovary',
+ 'Heart - Left Ventricle',
+ 'Esophagus - Muscularis',
+ 'Nerve - Tibial',
+ 'Colon - Transverse',
+ 'Brain - Hypothalamus',
+ 'Brain - Nucleus accumbens (basal ganglia)',
+ 'Artery - Aorta',
+ 'Pituitary',
+ 'Testis',
+ 'Artery - Coronary',
+ 'Pancreas',
+ 'Brain - Cerebellum',
+ 'Kidney - Cortex',
+ 'Vagina',
+ 'Esophagus - Mucosa',
+ 'Prostate',
+ 'Brain - Caudate (basal ganglia)',
+ 'Brain - Putamen (basal ganglia)',
+ 'Cells - EBV-transformed lymphocytes',
+ 'Brain - Cerebellar Hemisphere',
+ 'Brain - Frontal Cortex (BA9)',
+ 'Brain - Spinal cord (cervical c-1)',
+ 'Brain - Amygdala',
+ 'Brain - Substantia nigra',
+ 'Brain - Hippocampus',
+ 'Brain - Anterior cingulate cortex (BA24)']        
+"""        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
             
             

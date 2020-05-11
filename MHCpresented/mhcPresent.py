@@ -309,8 +309,10 @@ class NeoJ(Meta):
     def netMHCresult(self,HLA,pathSoftWare,mode,sb=0.5,wb=2.0):
         col = []
         for i in range(self.df.shape[0]):
+            print(i)
             merList = self.df['{0}mer'.format(self.mer)].tolist()[i]
-            if merList == ['MANUUAL']: merList = self.df['mannual'].tolist()[i]
+            if merList == ['MANNUAL']: merList = self.df['mannual'].tolist()[i]
+            print(merList)
             netMHCpan.pepFile(merList) # get query.pep file
             machine = netMHCpan('./query.pep',HLA,pathSoftWare,self.mer,mode,sb,wb)
             dic = machine.seperator()
@@ -530,7 +532,7 @@ def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-
     if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
 
 def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # one stop solution for newSplicingSite type
-    print(event)
+    #print(event)
     try: event.split('-')[0].split('_')[1]   # see if the former one has trailing part E1.2_8483494
     except IndexError: 
         former = event.split('-')[0]  # no trailing part, former part just E1.2, means newSplicingSite is in latter part
@@ -810,9 +812,29 @@ def check_exonlist_general(exonlist,index,strand):
         if str(query_subexon_num + 1) in dict[query_exon_num]: return False
         else: return True
         
-def neoJunctions(df,colname):
+def neoJunctions_oldMethod(df,colname):
     dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df[colname] <= 0.23))]
-    return dfNeoJunction  
+    return dfNeoJunction
+
+def neoJunction_newMethod(df):
+    condition = []
+    for i in range(df.shape[0]):
+        event = df.iloc[i]['UID']
+        per_h = df.iloc[i]['healthy_zero_percent']
+        if per_h > 0.95:
+            try:inspect = inspectGTEx(event,plot=False)
+            except KeyError: cond = True    # absent in normal GTEx data set
+            else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
+        else: cond = False
+        condition.append(cond)
+    condition = pd.Series(condition)
+    df_Neo = df[condition]
+    return df_Neo
+        
+        
+        
+            
+        
     
 def uid(df, i):
     uid = list(df['UID'])[i]       
@@ -1182,8 +1204,48 @@ def toFasta(list_,N):
             file1.write('>{0} mer\n'.format(index+1))
             file1.write('{0}\n'.format(item.strip('\'')))
 
+def inspectGTEx(event,tissue='all',plot=True):
+    flag = 0
+    import warnings
+    warnings.filterwarnings("ignore")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    global dicTissueExp
+    if tissue=='all':
+        tissueExp = dicTissueExp[event]
+        for tis,exp in tissueExp.items():
+            exp = exp.astype('float64')
+            exp=exp[np.logical_not(np.isnan(exp))]
+            if exp.size == 0: print('{0} data incomplete'.format(tis))
+            elif np.any(exp):   # have non-zero element
+                if plot==True:
+                    fig = plt.figure()
+                    plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
+                    plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
+                    plt.legend()
+                    plt.savefig('./figures/{1}.pdf'.format(event,tis),bbox_inches='tight')
+                    plt.close(fig)
+                else: continue
+            else: 
+                flag += 1
+                print('No expression in {}'.format(tis))
+            
+    else:
+        expression = dicTissueExp[event][tissue]
+        exp = expression.astype('float64')
+        exp=exp[np.logical_not(np.isnan(exp))]
+        if exp.size == 0: print('{0} data incomplete'.format(tissue))
+        elif np.any(exp):   # have non-zero element
+            plt.bar(np.arange(len(exp)),exp,width=0.2,label='tissue')
+            plt.legend()
+            plt.savefig('./{}.pdf'.format(tissue),bbox_inches='tight')
+            plt.show()
+            print(expression)
+    return flag  
 
 if __name__ == "__main__":
+#    import warnings
+#    warnings.filterwarnings("ignore")
 
     startTime = process_time()
     df = pd.read_csv('PSI.R1-V7_vs_Healthy.txt',sep='\t') 
@@ -1192,10 +1254,13 @@ if __name__ == "__main__":
     dict_fa = fasta_to_dict('Hs_gene-seq-2000_flank.fa')
     dfori = pd.read_csv('LUAD_Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation-filtered-75p.txt',sep='\t')
     dfgroup = pd.read_csv('groups.txt',sep='\t',header=None,names=['TCGA-ID','group','label'])
+    print('loading GTEx dataset, it will take 10 mins, please be patient')
+    with open('dicTissueExp.p','rb') as f3:
+        dicTissueExp = pickle.load(f3)
     metaBaml = Meta(df) #Instantiate Meta object
     metaBaml.getPercent(dfgroup,dfori,'LUAD_All',write=True)
-    dfNeoJunction = neoJunctions(metaBaml.df,'avg-Healthy')
-    NeoJBaml = NeoJ(dfNeoJunction,9) #Instantiate NeoJ object
+    dfNeoJunction = neoJunction_newMethod(metaBaml.df)
+    NeoJBaml = NeoJ(dfNeoJunction,11) #Instantiate NeoJ object
     NeoJBaml.getPercent(dfgroup,dfori,'LUAD_Neo',write=True)
     NeoJBaml.retrieveJunctionSite()
     NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
@@ -1216,7 +1281,7 @@ if __name__ == "__main__":
                           '/Users/ligk2e/Downloads/netMHCpan-4.1/netMHCpan','MHCI')
 #    NeoJBaml.netMHCresult('DRB1_0101,DRB1_1603','/Users/ligk2e/Downloads/netMHCIIpan-4.0/netMHCIIpan','MHCII') 
     
-    NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)
+    NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}_new.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))

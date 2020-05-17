@@ -7,7 +7,7 @@ Created on Mon Mar 30 17:32:27 2020
 """
 
 import os
-os.chdir('/Users/ligk2e/Desktop/project_LUAD/')
+os.chdir('/Users/ligk2e/Desktop/project_test/')
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
@@ -26,6 +26,7 @@ import requests
 
 class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannually set __repr__ or __str__
     def __init__(self, df):
+        
         self.df = df
     
     def __repr__(self):
@@ -224,6 +225,7 @@ class NeoJ(Meta):
     def getNmer(self):
         col = []
         for i in range(self.df.shape[0]):
+            print(i,'first round')
             peptides = list(self.df['peptide'])[i]
             merArray = []
             condition = any([False if pep=='' else True for pep in peptides]) # if False, means ['','',''], means can not match with any of existing transcript
@@ -235,7 +237,7 @@ class NeoJ(Meta):
                     else: 
                         tempArray = extractNmer(peptide,self.mer)
                         merArray.append(tempArray)
-            truthTable1 = [False if mer == '*' or mer == [] else True for mer in merArray]
+            truthTable1 = [False if mer == '*' or mer == [] or mer== '' else True for mer in merArray]
             if not any(truthTable1): merArray = ['Match but no translation or early stop']
             col.append(merArray)  # [ '','*',[], ['MTDJDKFDJF','FJDKFJDF'] ]
         self.df['{0}mer'.format(self.mer)] = col
@@ -250,6 +252,7 @@ class NeoJ(Meta):
     def mannual(self,check=False):
         col = []
         for i in range(self.df.shape[0]):
+            print(i,'second mannual round')
             merArray = []
             uid,junction,Nmer = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['{0}mer'.format(self.mer)].tolist()[i]
             if Nmer == ['MANNUAL']: 
@@ -270,7 +273,8 @@ class NeoJ(Meta):
                 # for NewExon type, no need to infer translation phase, just use junction sequence, mer should span junction site
                     junctionIndex = junction.find(',')
                     Nminus1 = self.mer - 1 
-                    junctionSlice = junction[junctionIndex-((Nminus1*3)-1):junctionIndex+(Nminus1*3)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
+                    front = 0 if junctionIndex-(Nminus1*3+2) < 0 else junctionIndex-(Nminus1*3+2)
+                    junctionSlice = junction[front:junctionIndex+(Nminus1*3+2)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
                     merArray = dna2aa2mer(junctionSlice,self.mer)   # merArray is a nested list
                     if check == True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                 if re.search(r'E\d+\.\d+_\d+',event):  # they belong to newSplicing site or fusion gene
@@ -283,7 +287,7 @@ class NeoJ(Meta):
                     
                     
                 if re.search(r'^I\d+\.\d+-',event) or re.search(r'-I\d+\.\d+$',event):
-                    merTumor = intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
+                    merArray = intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
                     if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray == [[]]: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
                 if re.search(r'E\d+\.\d+-E\d+\.\d+$',event):   # novel splicing: CLASP1:ENSG00000074054:E25.1-E26.1, just don't match with any existing one
@@ -309,10 +313,10 @@ class NeoJ(Meta):
     def netMHCresult(self,HLA,pathSoftWare,mode,sb=0.5,wb=2.0):
         col = []
         for i in range(self.df.shape[0]):
-            print(i)
+            #print(i)
             merList = self.df['{0}mer'.format(self.mer)].tolist()[i]
             if merList == ['MANNUAL']: merList = self.df['mannual'].tolist()[i]
-            print(merList)
+            #print(merList)
             netMHCpan.pepFile(merList) # get query.pep file
             machine = netMHCpan('./query.pep',HLA,pathSoftWare,self.mer,mode,sb,wb)
             dic = machine.seperator()
@@ -491,45 +495,52 @@ def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-
     query = event.split('-')[0]
     formerLength = len(junction.split(',')[0])
     merBucket = []
-    attrs = dict_exonCoords[EnsGID][query]
-    strand = attrs[1]
-    start = attrs[2]
-    breaking = int(start)+formerLength-1
-    allTranDict = dictExonList[EnsGID]
-    for tran,exonlist in allTranDict.items():
-        if query in exonlist: 
-            try:tranStartIndex = grabEnsemblTranscriptTable(tran)
-            except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
-            else:
-                if type(tranStartIndex) == int:
-                    if strand == '+':
-                        remainder = (int(breaking) - tranStartIndex) % 3   
-                        if remainder == 0: 
-                            front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                            junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
-                        elif remainder == 1: 
-                            front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                            junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
-                        elif remainder == 2: 
-                            front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                            junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
-                    elif strand == '-':
-
-                        remainder = (tranStartIndex - int(breaking)) % 3 
-                        if remainder == 0: 
-                            front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                            junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
-                        elif remainder == 1: 
-                            front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                            junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
-                        elif remainder == 2: 
-                            front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                            junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
-            
-                    peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                    merArray = extractNmer(peptide,N) 
-                    merBucket.append(merArray)
-    if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
+    try: attrs = dict_exonCoords[EnsGID][query]
+    except KeyError: #E6.1_3854692-ENSG00000267881:E2.1
+        print('complicated situation(both trailing and transplicing):{0},{1}'.format(EnsGID,event))
+        trailing = query.split('_')[1]  #  3854692
+        breaking = int(trailing)+1
+    else:
+        strand = attrs[1]
+        start = attrs[2]
+        breaking = int(start)+formerLength
+    finally:
+        allTranDict = dictExonList[EnsGID]
+        for tran,exonlist in allTranDict.items():
+            if query in exonlist: 
+                try:tranStartIndex = grabEnsemblTranscriptTable(tran)
+                except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
+                else:
+                    if type(tranStartIndex) == int:
+                        if strand == '+':
+                            remainder = (int(breaking) - tranStartIndex) % 3   
+                            if remainder == 0: 
+                                front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                            elif remainder == 1: 
+                                front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+                        elif strand == '-':
+    
+                            remainder = (tranStartIndex - int(breaking)) % 3 
+                            if remainder == 0: 
+                                front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
+                            elif remainder == 1: 
+                                front = 0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:junction.find(',')+((N-1)*3+2)].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
+                
+                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                        merArray = extractNmer(peptide,N) 
+                        merBucket.append(merArray)
+        if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
+    return merBucket
 
 def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # one stop solution for newSplicingSite type
     #print(event)
@@ -537,10 +548,12 @@ def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # o
     except IndexError: 
         former = event.split('-')[0]  # no trailing part, former part just E1.2, means newSplicingSite is in latter part
         query = former
-        trailing = event.split('-')[1].split('_')[1]
+        attrs = dict_exonCoords[EnsGID][query]
+        start = attrs[2]
+        trailing = int(start) + len(junction.split(',')[0])   # the coordinates of latter part position1
     else: 
         query = event.split('-')[0].split('_')[0]  # has trailing part, former part should get rid of trailing part
-        trailing = event.split('-')[0].split('_')[1]
+        trailing = int(event.split('-')[0].split('_')[1]) + 1    # the coordinates of latter part position1
     finally:
         merBucket = []   
         attrs = dict_exonCoords[EnsGID][query] # chr, strand, start, end
@@ -831,7 +844,8 @@ def neoJunction_newMethod(df):
     df_Neo = df[condition]
     return df_Neo
         
-        
+def neoJunction_testMethod(df):
+    return df        
         
             
         
@@ -1141,46 +1155,51 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
     if event.startswith('E'):   # only consider this situation, since intron retentions are predominantly associated with a translatable preceding exon, ending up with a early stop codon
         # namely: E2.4-I2.1, E22.1-I22.1
         former = event.split('-')[0]  # E2.4, E22.1
-        attrs = dict_exonCoords[EnsGID][former] # chr, strand, start, end
-        strand = attrs[1]        
-        allTransDict = dictExonList[EnsGID] 
-        for tran,exonlist in allTransDict.items():
-            if former in exonlist: 
-                try:tranStartIndex = grabEnsemblTranscriptTable(tran)
-                except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
-                else:
-                    if type(tranStartIndex) == int:
-                        if strand == '+':
-                            intronStartIndex = int(attrs[3]) + 1
-                            remainder = (intronStartIndex - tranStartIndex) % 3   # how many nts remaining before the first nt in intron
-                            # if 0, means the first nt in intron will be the first nt in codon triplet,
-                            # if 1, means the first nt in intron will be the second nt in codon triplet,
-                            # if 2, means the first nt in intron will be the third nt in codon triplet.
-                            if remainder == 0: 
-                                front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                                junctionSlice = junction[front:].replace(',','')
-                            elif remainder == 1: 
-                                front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                                junctionSlice = junction[front:].replace(',','')
-                            elif remainder == 2: 
-                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                                junctionSlice = junction[front:].replace(',','')
-                        elif strand == '-':
-                            intronStartIndex = int(attrs[3]) - 1
-                            remainder = (tranStartIndex - intronStartIndex) % 3 
-                            if remainder == 0: 
-                                front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                                junctionSlice = junction[front:].replace(',','')
-                            elif remainder == 1: 
-                                front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                                junctionSlice = junction[front:].replace(',','')
-                            elif remainder == 2: 
-                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                                junctionSlice = junction[front:].replace(',','')
-                
-                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                        merArray = extractNmer(peptide,N) 
-                        merBucket.append(merArray)
+        latter = event.split('-')[1]
+        #print(event,EnsGID,former)
+        try: attrs_former = dict_exonCoords[EnsGID][former] # chr, strand, start, end
+        except KeyError: print('preexisting bug, Event {0} in {1} doesn\'t have {2}!!!!!'.format(event,EnsGID,former))
+        else:
+            attrs_latter = dict_exonCoords[EnsGID][latter]
+            strand = attrs_latter[1]        
+            allTransDict = dictExonList[EnsGID] 
+            for tran,exonlist in allTransDict.items():
+                if former in exonlist: 
+                    try:tranStartIndex = grabEnsemblTranscriptTable(tran)
+                    except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
+                    else:
+                        if type(tranStartIndex) == int:
+                            if strand == '+':
+                                intronStartIndex = int(attrs_latter[3])
+                                remainder = (intronStartIndex - tranStartIndex) % 3   # how many nts remaining before the first nt in intron
+                                # if 0, means the first nt in intron will be the first nt in codon triplet,
+                                # if 1, means the first nt in intron will be the second nt in codon triplet,
+                                # if 2, means the first nt in intron will be the third nt in codon triplet.
+                                if remainder == 0: 
+                                    front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                    junctionSlice = junction[front:].replace(',','')
+                                elif remainder == 1: 
+                                    front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                    junctionSlice = junction[front:].replace(',','')
+                                elif remainder == 2: 
+                                    front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                    junctionSlice = junction[front:].replace(',','')
+                            elif strand == '-':
+                                intronStartIndex = int(attrs_latter[3]) - 1
+                                remainder = (tranStartIndex - intronStartIndex) % 3 
+                                if remainder == 0: 
+                                    front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                    junctionSlice = junction[front:].replace(',','')
+                                elif remainder == 1: 
+                                    front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                    junctionSlice = junction[front:].replace(',','')
+                                elif remainder == 2: 
+                                    front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                    junctionSlice = junction[front:].replace(',','')
+                    
+                            peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                            merArray = extractNmer(peptide,N) 
+                            merBucket.append(merArray)
         if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
         
     elif event.startswith('I'): merBucket = [[]]
@@ -1248,37 +1267,62 @@ if __name__ == "__main__":
 #    warnings.filterwarnings("ignore")
 
     startTime = process_time()
-    df = pd.read_csv('PSI.R1-V7_vs_Healthy.txt',sep='\t') 
-    df_exonlist = pd.read_csv('mRNA-ExonIDs.txt',sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
-    dict_exonCoords = exonCoords_to_dict('Hs_Ensembl_exon.txt','\t')
-    dict_fa = fasta_to_dict('Hs_gene-seq-2000_flank.fa')
-    dfori = pd.read_csv('LUAD_Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation-filtered-75p.txt',sep='\t')
-    dfgroup = pd.read_csv('groups.txt',sep='\t',header=None,names=['TCGA-ID','group','label'])
-    print('loading GTEx dataset, it will take 10 mins, please be patient')
-    with open('dicTissueExp.p','rb') as f3:
-        dicTissueExp = pickle.load(f3)
+    print('loading input files\n')
+    df = pd.read_csv('Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt',sep='\t') 
+    print('finished loading input files\n')
+    print('loading all existing transcripts files\n')
+    df_exonlist = pd.read_csv('./data/mRNA-ExonIDs.txt',sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
+    print('finished loading all existing transcripts files\n')
+    print('loading all subexon coordinates files\n')
+    dict_exonCoords = exonCoords_to_dict('./data/Hs_Ensembl_exon.txt','\t')
+    print('finished loading all subexon coordinates files\n')
+    print('loading exon sequence fasta files, 2GB\n')
+    dict_fa = fasta_to_dict('./data/Hs_gene-seq-2000_flank.fa')
+    print('finished loading exon sequence fasta files\n')
+    #dfori = pd.read_csv('LUAD_Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation-filtered-75p.txt',sep='\t')
+    #dfgroup = pd.read_csv('groups.txt',sep='\t',header=None,names=['TCGA-ID','group','label'])
+#    print('loading GTEx dataset, it will take 20 mins, please be patient')
+#    with open('dicTissueExp.p','rb') as f3:
+#        dicTissueExp = pickle.load(f3)
     metaBaml = Meta(df) #Instantiate Meta object
-    metaBaml.getPercent(dfgroup,dfori,'LUAD_All',write=True)
-    dfNeoJunction = neoJunction_newMethod(metaBaml.df)
+    #metaBaml.getPercent(dfgroup,dfori,'LUAD_All',write=True)
+    print('generate NeoJunctions\n')
+    dfNeoJunction = neoJunction_testMethod(metaBaml.df)
+    print('NeoJunctions are ready\n')
     NeoJBaml = NeoJ(dfNeoJunction,11) #Instantiate NeoJ object
-    NeoJBaml.getPercent(dfgroup,dfori,'LUAD_Neo',write=True)
+    print('start analysis\n')
+    #NeoJBaml.getPercent(dfgroup,dfori,'LUAD_Neo',write=True)
+    print('retrieve all junction site sequence\n')
     NeoJBaml.retrieveJunctionSite()
+    print('finished retrieving all junction site sequence\n')
+    print('inspecting each event see if they could match up with any existing transcripts\n')
     NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
+    print('finished inspecting each event see if they could match up with any existing transcripts\n')
+    print('getting most likely ORF and ORFaa for each event that could match up with existing transcript\n')
     NeoJBaml.getORF()
     NeoJBaml.getORFaa()
+    print('finished getting most likely ORF and ORFaa\n')
+    print('checking the phase of each event\'s junction site\n')
     NeoJBaml.phaseTranslateJunction()
+    print('finished checking the phase of each event\'s junction site\n')
+    print('getting Nmer, only for first round\n')
     NeoJBaml.getNmer()
-    
-    dictExonList = convertExonList(df_exonlist)  
+    print('first round ends\n')
+    print('converting subexon coordinates to a dictionary\n')
+    dictExonList = convertExonList(df_exonlist)
+    print('finished converting subexon coordinates to a dictionary\n ')
     #dictGTEx = backgroundGTEx(NeoJBaml.mer,dict_fa,dictExonList,dict_exonCoords)
     
     #NeoJBaml.getFinalMers()
+    print('starting to mannal check,second round\n')
     NeoJBaml.mannual()
+    print('finished mannual check\n')
     #NeoJBaml.collectNeoAntigen()
     #toFasta(NeoJBaml.mhcNeoAntigens,NeoJBaml.mer)
-    
-    NeoJBaml.netMHCresult('HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01',
+    print('starting to deploy netMHCpan4.1\n')
+    NeoJBaml.netMHCresult('HLA-A29:02,HLA-B51:01,HLA-B54:01,HLA-B57:01',
                           '/Users/ligk2e/Downloads/netMHCpan-4.1/netMHCpan','MHCI')
+    print('finished binding affinity prediction\n')
 #    NeoJBaml.netMHCresult('DRB1_0101,DRB1_1603','/Users/ligk2e/Downloads/netMHCIIpan-4.0/netMHCIIpan','MHCII') 
     
     NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}_new.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)

@@ -322,7 +322,7 @@ class NeoJ(Meta):
             dic = machine.seperator()
 
             col.append(dic)
-        self.df['MHCresult']=col
+        self.df['{0}result'.format(mode)]=col
             
 
 class netMHCpan():

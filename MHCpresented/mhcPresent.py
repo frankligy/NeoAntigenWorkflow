@@ -7,21 +7,30 @@ Created on Mon Mar 30 17:32:27 2020
 """
 
 import os
-os.chdir('/Users/ligk2e/Desktop/project_test/')
+import sys
+import warnings
+warnings.filterwarnings("ignore")
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
 import pandas as pd
-from decimal import Decimal as D
+import numpy as np
+import matplotlib.pyplot as plt
+import bz2
+import _pickle as cpickle
 import pickle
-import regex
 import re
 from time import process_time
-import collections
 from urllib.error import HTTPError
 import requests
-#from backgroundGTEx import backgroundGTEx,convertExonList,merPassGTExCheck,spread,getNmerNormal
-#from intronRetention import intron,grabEnsemblTranscriptTable
+import xmltodict
+import multiprocessing as mp
+import subprocess
+from pathos.multiprocessing import ProcessingPool as Pool
+import getopt
+from decimal import Decimal as D
+
+
 
 
 class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannually set __repr__ or __str__
@@ -84,7 +93,7 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
         self.df['healthy_distribution'] = col3
         if write==True: self.df.to_csv('see{0}.txt'.format(name),sep='\t',index=None)
             
-    def retrieveJunctionSite(self):
+    def retrieveJunctionSite(self,dict_exonCoords,dict_fa):
         exam_seq,back_seq = [],[]
         for i in range(self.df.shape[0]):
             temp = uid(self.df,i)
@@ -184,35 +193,27 @@ class NeoJ(Meta):
                         peptide = '*'
                         phaseArray.append(phase)
                         peptideArray.append(phase)
-                        print('The {}th transcript of {}, even though junction site\
-                        could match with, but optimal ORF suggests that junction site will not be translated'.format(j,list(self.df['UID'])[i]))
+                        print('The {}th transcript of {}, even though junction site could match with, but optimal ORF suggests that junction site will not be translated'.format(j,list(self.df['UID'])[i]))
                     else: 
                         former = junctionOri.find(',')  # length of former part, also the index of splicesite
                         phase = abs(startJun + former - startORF) % 3 
                         N = self.mer
                          
                         if phase == 0: 
-                            front=0 if former - ((N-1)*3) < 0 else former - (N-1)*3
+                            front=0 if former - ((N-1)*3) < 0 else (former - (N-1)*3)
                             
                             junctionSlice = junction[front: former + ((N-1)*3)].replace(',','')
                             #print(junctionSlice)
                         elif phase == 1: 
-                            front=0 if former - ((N-1)*3+1) <0 else former - ((N-1)*3+1)
+                            front=0 if former - ((N-1)*3+1) <0 else (former - ((N-1)*3+1))
                             junctionSlice = junction[front: former + ((N-1)*3+2)].replace(',','')
                             
                         elif phase == 2: 
-                            front=0 if former- ((N-1)*3+2) <0 else former- ((N-1)*3+2)
+                            front=0 if former - ((N-1)*3+2) <0 else (former - ((N-1)*3+2))
                             junctionSlice = junction[front: former + ((N-1)*3+1)].replace(',','')
                  
             
                         peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                        #print(peptide)
-                    
-                        
-                        
-                        
-                        
-                        
 
                         phaseArray.append(phase)
                         peptideArray.append(peptide)
@@ -225,7 +226,7 @@ class NeoJ(Meta):
     def getNmer(self):
         col = []
         for i in range(self.df.shape[0]):
-            print(i,'first round')
+            print(i,'first round-Process{}'.format(os.getpid()))
             peptides = list(self.df['peptide'])[i]
             merArray = []
             condition = any([False if pep=='' else True for pep in peptides]) # if False, means ['','',''], means can not match with any of existing transcript
@@ -242,17 +243,11 @@ class NeoJ(Meta):
             col.append(merArray)  # [ '','*',[], ['MTDJDKFDJF','FJDKFJDF'] ]
         self.df['{0}mer'.format(self.mer)] = col
         
-    def getFinalMers(self):
-        col = []
-        for i in range(self.df.shape[0]):
-            uid, merArray = list(self.df['UID'])[i], list(self.df['{0}mer'.format(self.mer)])[i]
-            col.append(merPassGTExCheck(dictGTEx,uid,merArray))
-        self.df['matchedFinalMer'] = col
                  
-    def mannual(self,check=False):
+    def mannual(self):
         col = []
         for i in range(self.df.shape[0]):
-            print(i,'second mannual round')
+            print(i,'second mannual round-process{}'.format(os.getpid()))
             merArray = []
             uid,junction,Nmer = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['{0}mer'.format(self.mer)].tolist()[i]
             if Nmer == ['MANNUAL']: 
@@ -267,7 +262,6 @@ class NeoJ(Meta):
                 if 'ENSG' in event:  # E4.3--ENSG00000267881:E2.1
                     # nearly the same as newSpliicng, query is former subexon, trailing is replaced as breaking point(start coordinate of former subexon + length of former part - 1)
                     merArray = tranSplicing(event,EnsGID,junction,self.mer,dictExonList,dict_exonCoords)
-                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray == [[]]: merArray = ['transplicing, already checked, query subexon not present in known transcript']
                 if re.search(r'I.+_\d+',event) or 'U' in event:  # they belong to NewExon type: including UTR type and blank type(the annotation is blank)
                 # for NewExon type, no need to infer translation phase, just use junction sequence, mer should span junction site
@@ -276,39 +270,26 @@ class NeoJ(Meta):
                     front = 0 if junctionIndex-(Nminus1*3+2) < 0 else junctionIndex-(Nminus1*3+2)
                     junctionSlice = junction[front:junctionIndex+(Nminus1*3+2)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
                     merArray = dna2aa2mer(junctionSlice,self.mer)   # merArray is a nested list
-                    if check == True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                 if re.search(r'E\d+\.\d+_\d+',event):  # they belong to newSplicing site or fusion gene
                 # for this type, just check if the former part (E1.2-E3.4, here E1.2 is former part) exist in known transcript, then infer the phase of translation
                     #print(event)
                     merArray = newSplicingSite(event,EnsGID,junction,self.mer,dictExonList,dict_exonCoords)   # nested list
-                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray == [[]]: merArray = ['newSplicing, already checked, query subexon not present in known transcript']
-                
-                    
-                    
+
                 if re.search(r'^I\d+\.\d+-',event) or re.search(r'-I\d+\.\d+$',event):
                     merArray = intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
-                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray == [[]]: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
                 if re.search(r'E\d+\.\d+-E\d+\.\d+$',event):   # novel splicing: CLASP1:ENSG00000074054:E25.1-E26.1, just don't match with any existing one
                     # here we extract the backEvent, which is E24.1-E27.1
                     #print(event)
                     backEvent = backEvent.replace('-','|')  # now it is E24.1|E27.1
                     merArray = novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,self.mer)
-                    if check==True: merArray = merPassGTExCheck(dictGTEx,uid,merTumor)
                     if merArray ==[[]]: merArray = ['novel ordinal splicing event, already checked, its background event can not match up with any existing transcript either']
                     
             col.append(merArray)
         self.df['mannual'] = col
         
-    def collectNeoAntigen(self):
-        list_ = []
-        known,novel = self.df['matchedFinalMer'].tolist(),self.df['mannual'].tolist()
-        whole = known+novel
-        filterBucket = [[],['newSplicing or fusion gene, already checked, either not translated or be eliminated by background check'],['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']]
-        for i in whole:
-            if not i in filterBucket: list_ += i
-        self.mhcNeoAntigens = list(set(list_))
+
     
     def netMHCresult(self,HLA,pathSoftWare,mode,sb=0.5,wb=2.0):
         col = []
@@ -318,7 +299,7 @@ class NeoJ(Meta):
             if merList == ['MANNUAL']: merList = self.df['mannual'].tolist()[i]
             #print(merList)
             netMHCpan.pepFile(merList) # get query.pep file
-            machine = netMHCpan('./query.pep',HLA,pathSoftWare,self.mer,mode,sb,wb)
+            machine = netMHCpan('./resultMHC/temp/query{}.pep'.format(os.getpid()),HLA,pathSoftWare,self.mer,mode,sb,wb)
             dic = machine.seperator()
 
             col.append(dic)
@@ -342,7 +323,7 @@ class netMHCpan():
         result = []
         [result.extend(item) for item in lis if isinstance(item,list)]
         result = list(set(result))
-        with open('query.pep','w') as f1:
+        with open('./resultMHC/temp/query{}.pep'.format(os.getpid()),'w') as f1:
             [f1.write('{}\n'.format(mer)) for mer in result]
         # now we have query.pep file
     
@@ -359,24 +340,22 @@ class netMHCpan():
 
     
     def runSoftWareI(self):
-        import subprocess
-        with open('./resultI.txt','w') as f3:
+        with open('./resultMHC/temp/resultI{}.txt'.format(os.getpid()),'w') as f3:
             subprocess.run([self.pathSoftWare,'-p',self.intFile, '-BA','-a',self.HLA,'-rth', str(self.sb), '-rlt', str(self.wb), '-l',str(self.length),'-t',str(self.wb)],stdout=f3)        
        # will generate a result file  
     
     def runSoftWareII(self):
-        import subprocess
-        with open('./resultII.txt','w') as f4:
+        with open('./resultMHC/temp/resultII{}.txt'.format(os.getpid()),'w') as f4:
             subprocess.run([self.pathSoftWare,'-f',self.intFile,'-inptype', '1', '-a',self.HLA,'-length',str(self.length)],stdout=f4)
     
     def postFileII(self):
-        with open('./resultII.txt','r') as f5,open('./resultII_parse.txt','w') as f6:
+        with open('./resultMHC/temp/resultII{}.txt'.format(os.getpid()),'r') as f5,open('./resultMHC/temp/resultII_parse{}.txt'.format(os.getpid()),'w') as f6:
             for line in f5:
                 if line.startswith('#') or line.startswith('-') or line.strip('\n') == '':continue
                 elif re.search(r'^\w+',line): continue
                 elif re.search(r'Pos',line): continue
                 else: f6.write(line)
-        try:df=pd.read_csv('./resultII_parse.txt',sep='\s+',header=None,index_col=0,names=[str(i+1) for i in range(11)])
+        try:df=pd.read_csv('./resultMHC/temp/resultII_parse{}.txt'.format(os.getpid()),sep='\s+',header=None,index_col=0,names=[str(i+1) for i in range(11)])
         except pd.errors.EmptyDataError: dic = 'No candidates'
         else:
             hlaAllele = df['2'].tolist()  # HLA Allele
@@ -401,13 +380,13 @@ class netMHCpan():
     
     def postFileI(self):
         # HLA = 'HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01'
-        with open('./resultI.txt','r') as f1, open('./resultI_parse.txt','w') as f2:
+        with open('./resultMHC/temp/resultI{}.txt'.format(os.getpid()),'r') as f1, open('./resultMHC/temp/resultI_parse{}.txt'.format(os.getpid()),'w') as f2:
             for line in f1:
                 if line.startswith('#') or line.startswith('-') or line.strip('\n') == '': continue
                 elif re.search(r'^\w+',line): continue
                 elif re.search(r'Pos',line): continue
                 else: f2.write(line)
-        try:df = pd.read_csv('./resultI_parse.txt',sep='\s+', header=None,index_col=0)  
+        try:df = pd.read_csv('./resultMHC/temp/resultI_parse{}.txt'.format(os.getpid()),sep='\s+', header=None,index_col=0)  
         except pd.errors.EmptyDataError: dic = 'No candidates'   
         else:
             hlaAllele = df[1].tolist()  # HLA Allele
@@ -596,46 +575,7 @@ def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # o
            
     return merBucket
 
-def getPhasePeptide(EnsGID,wholeTrans,ORFtrans,partialJunction,fullJunction):   # used in newSplicingSite situation
-    phaseArray,peptideArray = [],[]
-    if not wholeTrans:             # the EnsGID doesn't exist in mRNA-exon file
-        phaseArray.append('#')
-        peptideArray.append('#')
-        print('This gene {0} is absent in mRNA-ExonID file\n'.format(EnsGID))
-    for j in range(len(wholeTrans)):
-        if not wholeTrans[j]: 
-             phaseArray.append('') 
-             peptideArray.append('')# splicing evnet can not match to this transcript
-        else:
-            startJun = wholeTrans[j].find(partialJunction[:-1]) # trim the right-most overhang for simplicity
-            endJun = startJun + len(partialJunction[:-1])
-            startORF = wholeTrans[j].find(ORFtrans[j])
-            endORF = startORF + len(ORFtrans[j])
-            if startJun > endORF or endJun < startORF:
-                phase = '*'  # means junction site will not be translated
-                peptide = '*'
-                phaseArray.append(phase)
-                peptideArray.append(phase)
-                print('The {}th transcript of {}, even though junction site\
-                could match with, but optimal ORF suggests that junction site will not be translated'.format(j,EnsGID))
-            else: 
-                
-                
-        
-                former = fullJunction.find(',')  # length of former part, also the index of splicesite
-                phase = abs(startJun + former - startORF) % 3 
-                N = self.mer
-                 
-                if phase == 0: junctionSlice = junction[former - ((N-1)*3): former + ((N-1)*3)].replace(',','')
-                elif phase == 1: junctionSlice = junction[former - ((N-1)*3+1):former + ((N-1)*3+2)].replace(',','')
-                elif phase == 2: junctionSlice = junction[former- ((N-1)*3+2): former + ((N-1)*3+1)].replace(',','')
-         
-    
-                peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                
-                phaseArray.append(phase)
-                peptideArray.append(peptide)
-    return phaseArray,peptideArray
+
 
                     
 def dna2aa2mer(dna,N):
@@ -825,11 +765,27 @@ def check_exonlist_general(exonlist,index,strand):
         if str(query_subexon_num + 1) in dict[query_exon_num]: return False
         else: return True
         
-def neoJunctions_oldMethod(df,colname):
+def neoJunctions_oldMethod_noGTEx(df,colname):
     dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df[colname] <= 0.23))]
     return dfNeoJunction
 
-def neoJunction_newMethod(df):
+def neoJunction_oldMethod_checkGTEx(df,colname):
+    condition = []
+    for i in range(df.shape[0]):
+        event = df.iloc[i]['UID']
+        healthy = df.iloc[i][colname]
+        dPSI = df.iloc[i]['dPSI']
+        if dPSI >= 0.3 and healthy <= 0.23: 
+            try:inspect = inspectGTEx(event,plot=False)
+            except KeyError: cond = True    # absent in normal GTEx data set
+            else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
+        else: cond = False
+        condition.append(cond)
+    condition = pd.Series(condition)
+    df_Neo = df[condition]
+    return df_Neo
+
+def neoJunction_newMethod_checkGTEx(df):
     condition = []
     for i in range(df.shape[0]):
         event = df.iloc[i]['UID']
@@ -843,11 +799,36 @@ def neoJunction_newMethod(df):
     condition = pd.Series(condition)
     df_Neo = df[condition]
     return df_Neo
+
+
+def neoJunction_newMethod_noGTEx(df):
+    condition = []
+    for i in range(df.shape[0]):
+        event = df.iloc[i]['UID']
+        per_h = df.iloc[i]['healthy_zero_percent']
+        if per_h > 0.95:
+            cond = True
+        else: cond = False
+        condition.append(cond)
+    condition = pd.Series(condition)
+    df_Neo = df[condition]
+    return df_Neo
         
-def neoJunction_testMethod(df):
+def neoJunction_testMethod_noGTEx(df):
     return df        
         
-            
+def neoJunction_testMethod_checkGTEx(df):
+    condition = []
+    for i in range(df.shape[0]):
+        event = df.iloc[i]['UID']
+
+        try:inspect = inspectGTEx(event,plot=False)
+        except KeyError: cond = True    # absent in normal GTEx data set
+        else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
+        condition.append(cond)
+    condition = pd.Series(condition)
+    df_Neo = df[condition]
+    return df_Neo          
         
     
 def uid(df, i):
@@ -933,8 +914,6 @@ def utrAttrs(EnsID,dict_exonCoords):
 
 
 def retrieveSeqFromUCSCapi(chr_,start,end):
-    import requests
-    import xmltodict
     url = 'http://genome.ucsc.edu/cgi-bin/das/hg38/dna?segment={0}:{1},{2}'.format(chr_,start,end)
     response = requests.get(url)
     status_code = response.status_code
@@ -998,65 +977,6 @@ def exonCoords_to_dict(path,delimiter):
     # final structure {'EnsID':{E1:[chr,strand,start,end],E2:[chr,strand,start,end]}}
     return dict_exonCoords
 
-def backgroundGTEx(N,dict_fa,dictExonList,dict_exonCoords):
-    '''
-    Run following command in your terminal, get sampleType.txt, wholeBloodID,allsampleID.txt
-    
-    cut -f 1,7 GTEx_Analysis_v8_Annotations_SampleAttributesDS.txt | awk 'BEGIN {FS="\t";} {if (NR>1) {print $1 "\t" $2;}}' > sampleType.txt
-    awk '{if ($2 ~/Whole/) {print $1}}' sampleType.txt > wholeBloodID.txt 
-    head -n 3 GTEx_Analysis_2017-06-05_v8_RSEMv1.3.0_transcript_tpm.gct | tail -n 1 | tr '\t' '\n' | awk 'NR>2' > allsampleID.txt
-    
-    '''
-    
-    wholeBloodID = list(pd.read_csv('BreastID.txt',sep='\n',header=None,names=['id'])['id'])
-    allsampleID = list(pd.read_csv('allsampleID.txt',sep='\n',header=None,names=['id'])['id'])
-    overlapID = []
-    for id_ in allsampleID:
-        if id_ in wholeBloodID: overlapID.append(id_)
-    
-    if os.path.exists('tranTPMsim.p'):
-        with open('tranTPMsim.p','rb') as file1:
-            tranTPMsim = pickle.load(file1)
-    else:            
-        tranTPMexp = pd.read_csv('GTEx_Analysis_2017-06-05_v8_RSEMv1.3.0_transcript_tpm.gct',sep='\t',skiprows=2,usecols=overlapID)
-        tranTPMid = pd.read_csv('GTEx_Analysis_2017-06-05_v8_RSEMv1.3.0_transcript_tpm.gct',sep='\t',skiprows=2,usecols=['transcript_id','gene_id'])
-        tranTPM = pd.concat([tranTPMid,tranTPMexp],axis = 1, sort = False)
-        ave = tranTPM.mean(axis = 1, skipna = True, numeric_only = True)
-        tranTPM = pd.concat([tranTPM,ave],axis=1,sort=False)
-        tranTPMsim = tranTPM.drop(overlapID,axis = 1)
-        tranTPMsim = tranTPMsim.rename(columns={0:'mean'})  # change the last average column's name to 'mean'
-
-        with open('tranTPMsim.p','wb') as file2:
-            pickle.dump(tranTPMsim,file2)
-    '''
-    transcript_id  gene_id    mean
-      EnsTID        EnsGID    0.08
-      
-    '''
-    # convert to a dict
-    if os.path.exists('dictGTEx.p'):
-        with open('dictGTEx.p','rb') as file3:
-            dictGTEx = pickle.load(file3)
-    else:            
-        dictGTEx = {}
-        for i in range(tranTPMsim.shape[0]):
-            EnsGID = tranTPMsim.iat[i,1][:15]
-            EnsTID = tranTPMsim.iat[i,0][:15]
-            mean = tranTPMsim.iat[i,2]
-            if mean > 0.3: highExpression = True
-            else: highExpression = False
-            if highExpression: merArrayNormal = getNmerNormal(EnsGID,EnsTID,N,dict_fa,dictExonList,dict_exonCoords)  # merArrayNormal is all 9mer for each transcript that expresses in normal tissue
-            try: 
-                dictGTEx[EnsGID][0][EnsTID] = highExpression
-                try: merArrayNormal   
-                except NameError: pass  # if no merArrayNormal, means that this transcript is not highly expressed
-                else:dictGTEx[EnsGID][1]['wholeMerArrayNormal'].append(merArrayNormal)
-            except KeyError: dictGTEx[EnsGID] = [{EnsTID:highExpression},{'wholeMerArrayNormal':[]}]
-        with open('dictGTEx.p','wb') as file4:
-            pickle.dump(dictGTEx,file4)
-
-        # {'EnsGID:[{EnsTID:False,EnsID:True},{'wholeMerArrayNormal':[['DJFD','FKJDF'],['DJFD','FKJDF']]}]}
-    return dictGTEx
  
 def convertExonList(df):
     dictExonList = {}
@@ -1071,13 +991,6 @@ def convertExonList(df):
     
 
 
-def merPassGTExCheck(dictGTEx,uid,merArray):   # pass nested list [[],[],[]]
-    EnsGID = uid.split('|')[0].split(':')[1]
-    normalMer = dictGTEx[EnsGID][1]['wholeMerArrayNormal']
-    arrangedNormal = spread(normalMer)
-    arrangedSplicing = spread(merArray)
-    uniqueInSplicing = list(arrangedSplicing - arrangedNormal)
-    return uniqueInSplicing
     
 
 def spread(list_):
@@ -1087,68 +1000,6 @@ def spread(list_):
     ret = set(ret)
     return ret
 
-
-
-    
-
-    
-        
-    
-
-    
-    
-    
-def flattenNestedList(list_,mode=0,clean=False): # mode = 0 means returning flatten list, mode = 1 means converting to set, mode = 2 means converting to list(set())
-    # input a nested list, only extract element from non-empty sub list.
-    flatten = []
-    if not clean:
-        for sublist in list_:
-            flatten = [item for item in sublist]
-        if mode == 0: return flatten
-        elif mode == 1: return set(flatten)
-        elif mode == 2: return list(set(flatten))
-    elif clean:   # clean will remove '*',[],'MANNUAL'
-        for sublist in list_:
-            if isinstance(sublist,list) and sublist:  # if the sub is a non-empty list
-                flatten = [item for item in sublist]
-        if mode == 0: return flatten
-        elif mode == 1: return set(flatten)
-        elif mode == 2: return list(set(flatten))
-            
-
-
-
-
-           
-def getNmerNormal(EnsID,EnsTID,N,dict_fa,dictExonList,dict_exonCoords):
-    try:exonlist = dictExonList[EnsID][EnsTID] 
-    except KeyError: print('{0} of {1} doesn\'t exist in mRNA-ExonID file'.format(EnsTID,EnsID))                             
-    # obtain the full-length sequence for this exonlist to check its resultant 9mer
-    else:
-        Exonlist = exonlist.split('|')  # [E1.1,E1.2,E3.4....]
-        full_transcript = ''
-        for j in range(len(Exonlist)):
-            coords = dict_exonCoords[EnsID][Exonlist[j]]
-            strand = coords[1]
-            judge = check_exonlist_general(Exonlist,j,strand)
-            if strand == '+' and judge:   
-                frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
-            elif strand == '+' and not judge:
-                frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
-            elif strand == '-' and judge:
-                frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
-            elif strand == '-' and not judge:
-                frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
-            # expression of minus strand, need to draw an illustrator to visulize that.
-            full_transcript += frag
-        full_transcript = full_transcript.replace('\n','')
-    
-    
-        # continue to get ORF
-        ORF = transcript2peptide(full_transcript)
-        peptide = str(Seq(ORF,generic_dna).translate(to_stop=False))
-        merArray = extractNmer(peptide,N)  # all the 9mer the normal
-        return merArray   # ['SRTTIFDFJD','FJDJFKDJFKDJ','FJKDFJKDF']
     
 def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
     merBucket = []
@@ -1165,6 +1016,7 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
             allTransDict = dictExonList[EnsGID] 
             for tran,exonlist in allTransDict.items():
                 if former in exonlist: 
+                    #print(tran,'*******************************************************')
                     try:tranStartIndex = grabEnsemblTranscriptTable(tran)
                     except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
                     else:
@@ -1208,13 +1060,19 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
 
 # https://rest.ensembl.org/documentation/info/lookup
 def grabEnsemblTranscriptTable(EnsTID):
+    global counter
+    print(EnsTID,'**********************************************************')
     server = "https://rest.ensembl.org"
     ext = "/lookup/id/{0}?expand=1".format(EnsTID)     
     r = requests.get(server+ext, headers={ "Content-Type" : "application/json"})     
-    decoded = r.json()
-    try: translationStartIndex = decoded['Translation']['start']
-    except KeyError: print('{0} is not translatable'.format(EnsTID)) # might be invalid transcriptID or they don't have tranStartIndex(don't encode protein)
-    else: return translationStartIndex
+    try: decoded = r.json()
+    except: 
+        counter += 1
+        print('JSON unknoen error {}'.format(counter))
+    else:
+        try: translationStartIndex = decoded['Translation']['start']
+        except KeyError: print('{0} is not translatable'.format(EnsTID)) # might be invalid transcriptID or they don't have tranStartIndex(don't encode protein)
+        else: return translationStartIndex
 # for except branch, we don't specify return command, so it will return NoneType   
 
 def toFasta(list_,N):
@@ -1225,10 +1083,7 @@ def toFasta(list_,N):
 
 def inspectGTEx(event,tissue='all',plot=True):
     flag = 0
-    import warnings
-    warnings.filterwarnings("ignore")
-    import matplotlib.pyplot as plt
-    import numpy as np
+
     global dicTissueExp
     if tissue=='all':
         tissueExp = dicTissueExp[event]
@@ -1262,13 +1117,49 @@ def inspectGTEx(event,tissue='all',plot=True):
             print(expression)
     return flag  
 
-if __name__ == "__main__":
-#    import warnings
-#    warnings.filterwarnings("ignore")
+
+def run(NeoJBaml):
+    PID = os.getpid()
+
+    print('retrieve all junction site sequence-Process:{0}\n'.format(PID))
+    NeoJBaml.retrieveJunctionSite(dict_exonCoords,dict_fa)
+    print('finished retrieving all junction site sequence-Process:{0}\n'.format(PID))
+    print('inspecting each event see if they could match up with any existing transcripts-Process:{0}\n'.format(PID))
+    NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
+    print('finished inspecting each event see if they could match up with any existing transcripts-Process:{0}\n'.format(PID))
+    print('getting most likely ORF and ORFaa for each event that could match up with existing transcript-Process:{0}\n'.format(PID))
+    NeoJBaml.getORF()
+    NeoJBaml.getORFaa()
+    print('finished getting most likely ORF and ORFaa-Process:{0}\n'.format(PID))
+    print('checking the phase of each event\'s junction site-Process:{0}\n'.format(PID))
+    NeoJBaml.phaseTranslateJunction()
+    print('finished checking the phase of each event\'s junction site-Process:{0}\n'.format(PID))
+    print('getting Nmer, only for first round-Process:{0}\n'.format(PID))
+    NeoJBaml.getNmer()
+    print('first round ends-Process:{0}\n'.format(PID))
+
+    print('starting to mannal check,second round-Process:{0}\n'.format(PID))
+    NeoJBaml.mannual()
+    print('finished mannual check-Process:{0}\n'.format(PID))
+    print('starting to deploy netMHCpan-Process:{0}\n'.format(PID))
+    if MHCmode == 'MHCI':
+        NeoJBaml.netMHCresult(HLA,software,MHCmode)
+    elif MHCmode == 'MHCII':
+        NeoJBaml.netMHCresult(HLA,software,MHCmode) 
+    print('finished binding affinity prediction-Process:{0}\n'.format(PID))
+    return NeoJBaml.df
+
+
+def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkGTEx=False,EventAnnotationFile='dummy.txt',GroupsFile='proxy.txt'):
 
     startTime = process_time()
+    global df
+    global df_exonlist
+    global dict_exonCoords
+    global dict_fa
+    global dictExonList
     print('loading input files\n')
-    df = pd.read_csv('Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt',sep='\t') 
+    df = pd.read_csv(intFile,sep='\t') 
     print('finished loading input files\n')
     print('loading all existing transcripts files\n')
     df_exonlist = pd.read_csv('./data/mRNA-ExonIDs.txt',sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
@@ -1279,62 +1170,169 @@ if __name__ == "__main__":
     print('loading exon sequence fasta files, 2GB\n')
     dict_fa = fasta_to_dict('./data/Hs_gene-seq-2000_flank.fa')
     print('finished loading exon sequence fasta files\n')
-    #dfori = pd.read_csv('LUAD_Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation-filtered-75p.txt',sep='\t')
-    #dfgroup = pd.read_csv('groups.txt',sep='\t',header=None,names=['TCGA-ID','group','label'])
-#    print('loading GTEx dataset, it will take 20 mins, please be patient')
-#    with open('dicTissueExp.p','rb') as f3:
-#        dicTissueExp = pickle.load(f3)
-    metaBaml = Meta(df) #Instantiate Meta object
-    #metaBaml.getPercent(dfgroup,dfori,'LUAD_All',write=True)
-    print('generate NeoJunctions\n')
-    dfNeoJunction = neoJunction_testMethod(metaBaml.df)
-    print('NeoJunctions are ready\n')
-    NeoJBaml = NeoJ(dfNeoJunction,11) #Instantiate NeoJ object
-    print('start analysis\n')
-    #NeoJBaml.getPercent(dfgroup,dfori,'LUAD_Neo',write=True)
-    print('retrieve all junction site sequence\n')
-    NeoJBaml.retrieveJunctionSite()
-    print('finished retrieving all junction site sequence\n')
-    print('inspecting each event see if they could match up with any existing transcripts\n')
-    NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
-    print('finished inspecting each event see if they could match up with any existing transcripts\n')
-    print('getting most likely ORF and ORFaa for each event that could match up with existing transcript\n')
-    NeoJBaml.getORF()
-    NeoJBaml.getORFaa()
-    print('finished getting most likely ORF and ORFaa\n')
-    print('checking the phase of each event\'s junction site\n')
-    NeoJBaml.phaseTranslateJunction()
-    print('finished checking the phase of each event\'s junction site\n')
-    print('getting Nmer, only for first round\n')
-    NeoJBaml.getNmer()
-    print('first round ends\n')
-    print('converting subexon coordinates to a dictionary\n')
+    print('converting subexon coordinates to a dictionary-Process\n')
     dictExonList = convertExonList(df_exonlist)
-    print('finished converting subexon coordinates to a dictionary\n ')
-    #dictGTEx = backgroundGTEx(NeoJBaml.mer,dict_fa,dictExonList,dict_exonCoords)
+    print('finished converting subexon coordinates to a dictionary-Process\n')
+    if mode == 'OncoSplice' and checkGTEx==True:
+        dfori = pd.read_csv(EventAnnotationFile,sep='\t')
+        dfgroup = pd.read_csv(GroupsFile,sep='\t',header=None,names=['TCGA-ID','group','label'])
+        print('loading GTEx dataset, it will take 20 mins, please be patient')
+
+        start = process_time()
+
+        with bz2.BZ2File('dicTissueExp2.pbz2','rb') as f1:
+            dicTissueExp = cpickle.load(f1)  
+            end = process_time()    
+        print('consume {0}'.format(end-start))
+        
+        metaBaml = Meta(df) #Instantiate Meta object
+        metaBaml.getPercent(dfgroup,dfori,'{0}_All'.format(taskName),write=True)
+        print('generate NeoJunctions\n')
+        dfNeoJunction = neoJunction_newMethod_checkGTEx(metaBaml.df)
+        print('NeoJunctions are ready\n')
     
-    #NeoJBaml.getFinalMers()
-    print('starting to mannal check,second round\n')
-    NeoJBaml.mannual()
-    print('finished mannual check\n')
-    #NeoJBaml.collectNeoAntigen()
-    #toFasta(NeoJBaml.mhcNeoAntigens,NeoJBaml.mer)
-    print('starting to deploy netMHCpan4.1\n')
-    NeoJBaml.netMHCresult('HLA-A29:02,HLA-B51:01,HLA-B54:01,HLA-B57:01',
-                          '/Users/ligk2e/Downloads/netMHCpan-4.1/netMHCpan','MHCI')
-    print('finished binding affinity prediction\n')
-#    NeoJBaml.netMHCresult('DRB1_0101,DRB1_1603','/Users/ligk2e/Downloads/netMHCIIpan-4.0/netMHCIIpan','MHCII') 
+    if mode == 'OncoSplice' and checkGTEx == False:
+        dfori = pd.read_csv(EventAnnotationFile,sep='\t')
+        dfgroup = pd.read_csv(GroupsFile,sep='\t',header=None,names=['TCGA-ID','group','label'])
+        metaBaml = Meta(df) #Instantiate Meta object
+        metaBaml.getPercent(dfgroup,dfori,'{0}_All'.format(taskName),write=True)
+        print('generate NeoJunctions\n')
+        dfNeoJunction = neoJunction_newMethod_noGTEx(metaBaml.df)
+        print('NeoJunctions are ready\n')
     
-    NeoJBaml.df.to_csv('./resultMHC/NeoJunction_{0}_new.txt'.format(NeoJBaml.mer),sep='\t',header=True,index = False)
+    
+        
+    if mode == 'TumorAndControl' and checkGTEx == True:
+        print('loading GTEx dataset, it will take 20 mins, please be patient')
+        start = process_time()
+        with bz2.BZ2File('./data/dicTissueExp2.pbz2','rb') as f1:
+            dicTissueExp = cpickle.load(f1)  
+            end = process_time()    
+        print('consume {0}'.format(end-start))
+        metaBaml = Meta(df) #Instantiate Meta object
+        print('generate NeoJunctions\n')
+        dfNeoJunction = neoJunction_oldMethod_checkGTEx(metaBaml.df)
+        print('NeoJunctions are ready\n')
+        
+    if mode=='TumorAndControl' and checkGTEx == False:
+        metaBaml = Meta(df) #Instantiate Meta object
+        print('generate NeoJunctions\n')
+        dfNeoJunction = neoJunction_oldMethod_noGTEx(metaBaml.df)
+        print('NeoJunctions are ready\n')
+        
+    if mode == 'singleSample' and checkGTEx == True:
+        print('loading GTEx dataset, it will take 20 mins, please be patient')
+        start = process_time()
+        with bz2.BZ2File('dicTissueExp2.pbz2','rb') as f1:
+            dicTissueExp = cpickle.load(f1)  
+            end = process_time()    
+        print('consume {0}'.format(end-start))
+        metaBaml = Meta(df) #Instantiate Meta object
+        print('generate NeoJunctions\n')
+        dfNeoJunction = neoJunction_testMethod_checkGTEx(metaBaml.df)
+        print('NeoJunctions are ready\n')
+        
+    if mode == 'singleSample' and checkGTEx == False:
+        metaBaml = Meta(df) #Instantiate Meta object
+        print('generate NeoJunctions\n')
+        dfNeoJunction = neoJunction_testMethod_noGTEx(metaBaml.df)
+        print('NeoJunctions are ready\n')
+       
+    print('start analysis and spawn subprocesses\n')
+
+
+
+
+    df_split = np.array_split(dfNeoJunction, Core, axis=0)    # cut by rows, equally splited 
+    obj_split = [NeoJ(df,k) for df in df_split]
+    pool = Pool(Core)
+    df_out_list = pool.map(run, obj_split)
+    pool.close()
+    pool.join()
+    Crystal = pd.concat(df_out_list)   # default is stacking by rows
+    
+    Crystal.to_csv('./resultMHC/NeoJunction_{0}_mark.txt'.format(k),sep='\t',header=True,index = False)
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))
-    #print(len(NeoJBaml.mhcNeoAntigens))
+
+
+def usage():
+
+
+    print('Usage:')
+    print('python3 mhcPresent.py -i ./Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt -t test -k 8 -H HLA-A29:02,HLA-B51:01,HLA-B54:01,HLA-B57:01 -s /data/salomonis2/LabFiles/Frank-Li/python3/netMHCpan-4.1/netMHCpan -M MHCI -m singleSample -C 8 -c False')
+    print('Options:')
+    print('-i : path of input file')
+    print('-t : the name of your task')
+    print('-k : Kmer')
+    print('-H : queried HLA alleles')
+    print('-s : full path for where netMHCpan sit')
+    print('-M : MHCmode, either MHCI or MHCII')
+    print('-m : mode for generating Neo-Junctions')
+    print('-C : how many processes you wanna spawn')
+    print('-c: check GTEx data or not')
+    print('--EventAnnotationFile: Oncosplice mode, path of EventAnnotation File')
+    print('--GroupsFile: Oncosplice mode, path of OncoSplice File')
+    print('-h --help : check help information ')
+    print('Author: Guangyuan(Frank) Li <li2g2@mail.uc.edu>, PhD Student, University of Cincinnati, 2020') 
     
 
 
 
+if __name__ == "__main__":
 
+#    log_err = open('queryGTEx.stderr.log','a')
+#    log_out = open('queryGTEx.stdout.log','a')
+#    sys.stderr = log_err
+#    sys.stdout = log_out
+    try:
+        options, remainder = getopt.getopt(sys.argv[1:],'hi:t:k:H:s:M:m:C:c:',['help','EventAnnotationFile=','GroupsFile='])
+    except getopt.GetoptError as err:
+        print('ERROR:', err)
+        usage()
+        sys.exit(1)
+    for opt, arg in options:
+        if opt in ('-i'):
+            intFile = arg
+            print('Input file is:', arg)
+        elif opt in ('-t'):
+            taskName = arg
+            print('give your task a name:',arg)
+        elif opt in ('-k'):
+            k= int(arg)
+            print('kmer:', arg)
+        elif opt in ('-H'):
+            HLA = arg
+            print('Queried HLA allele:',arg)
+        elif opt in ('-s'):
+            software = arg
+            print('Full path of netMHCpan standalone version:',arg)
+        elif opt in ('-M'):
+            MHCmode = arg
+            print('MHCI or MHCII:',arg)
+        elif opt in ('-m'):
+            mode = arg
+            print('How to get Neo-Junction:',arg)
+        elif opt in ('-C'):
+            Core = int(arg)
+            print('How many processes to use:',arg)
+        elif opt in ('-c'):
+            checkGTEx = bool(arg)
+            print('check GTEx or not:',arg)
+        elif opt in ('--EventAnnotationFile'):
+            EventAnnotationFile = arg
+            print('Oncosplice mode, you have to specify full path of EventAnnotation:',arg)
+        elif opt in ('--GroupsFile'):
+            GroupsFile = arg
+            print('Oncosplice mode, you have to specify full path of GroupsFile:',arg)
+        elif opt in ('--help','-h'):
+            usage() 
+            sys.exit() 
+
+    counter = 0
+    main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkGTEx=False,EventAnnotationFile='dummy.txt',GroupsFile='proxy.txt')
+    print(counter)
     
     
     

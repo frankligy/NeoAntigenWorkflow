@@ -11,19 +11,24 @@ os.chdir('/Users/ligk2e/Desktop/project_test')
 import pandas as pd
 import ast
 
-neo_antigen = pd.read_csv('./resultMHC/NeoJunction_11_new.txt',sep='\t',usecols=['MHCresult'])
-neo_antigen_list = neo_antigen['MHCresult'].tolist()
+neo_antigen11 = pd.read_csv('NeoJunction_11_mark.txt',sep='\t',usecols=['MHCIresult'])
+neo_antigen_list11 = neo_antigen11['MHCIresult'].tolist()
 
-sb,wb = [],[]
-for item in neo_antigen_list:
-    if item == 'No candidates': continue
-    else: 
-        info = ast.literal_eval(item)
-        pep = info['HLA-A29:02']
-        pep_sb,pep_wb = pep[0],pep[1]
-        sb.extend(pep_sb)
-        wb.extend(pep_wb)
-b = sb + wb
+def getb(list_):
+    sb,wb = [],[]
+    for item in list_:
+        if item == 'No candidates': continue
+        else: 
+            info = ast.literal_eval(item)
+            pep = info['HLA-A29:02']
+            pep_sb,pep_wb = pep[0],pep[1]
+            sb.extend(pep_sb)
+            wb.extend(pep_wb)
+    b = sb + wb
+    return b
+
+b11 = getb(neo_antigen_list11)
+b11_st = set(b11)
 
 # write to fasta
 def toFasta(list_):

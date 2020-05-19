@@ -6,11 +6,96 @@ Created on Sun May 17 12:27:22 2020
 @author: ligk2e
 """
 import os
-os.chdir('/Users/ligk2e/Desktop/project_test')
+#os.chdir('/Users/ligk2e/Desktop/project_test')
 import pandas as pd
 
+def scratchPlusView1():
 
-def scratchPlusView():
+
+    sraTable1 = pd.read_csv('./SraRunTable-GTEX1.txt',sep=',')
+    sraTable2 = pd.read_csv('./SraRunTable-GTEX2.txt',sep=',')
+    sraTable3 = pd.read_csv('./SraRunTable-GTEX3.txt',sep=',')
+    sraData = pd.read_csv('./GTEx_EventAnnotation.txt',sep='\t')
+    
+    dicSRA = {}
+    for i in range(sraTable1.shape[0]):
+        accID, tissue= sraTable1['Run'].tolist()[i],sraTable1['body_site'].tolist()[i]
+        try: dicSRA[tissue].append(accID)
+        except KeyError:
+            dicSRA[tissue] = []
+            dicSRA[tissue].append(accID)
+    
+    for i in range(sraTable2.shape[0]):
+        accID, tissue= sraTable2['Run'].tolist()[i],sraTable2['body_site'].tolist()[i]
+        try: dicSRA[tissue].append(accID)
+        except KeyError:
+            dicSRA[tissue] = []
+            dicSRA[tissue].append(accID)
+        
+    for i in range(sraTable3.shape[0]):
+        accID, tissue= sraTable3['Run'].tolist()[i],sraTable3['body_site'].tolist()[i]
+        try: dicSRA[tissue].append(accID)
+        except KeyError:
+            dicSRA[tissue] = []
+            dicSRA[tissue].append(accID)  
+            
+    
+    
+    class Spliter():
+        def __init__(self,good):   # good is seperable based on some index
+            self.good = good
+            self.queue = []  # to store splited data
+        
+        def split_df(self,n):
+            dim  = self.good.shape[0]
+            lis = [i for i in range(dim)]
+            size = len(lis)//n + 1
+            for j in range(0,len(lis),size):
+                part_index = lis[j:j+size]
+                part_df = self.good.iloc[part_index]
+                
+                self.queue.append(part_df)
+        
+    Spliter1 = Spliter(sraData) 
+    Spliter1.split_df(20)  
+    liaisonData = Spliter1.queue 
+    
+    def constructDic(sraData):
+    
+        dicTissueExp = {}
+        for i in range(sraData.shape[0]):
+            print('this is the {0}th run of process{1}'.format(i,os.getpid()))
+            event = sraData['UID'].tolist()[i]
+            for tissue,accID in dicSRA.items():
+                try: dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
+                except KeyError:            
+                    dicTissueExp[event] = {}
+                    dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
+        return dicTissueExp
+    
+    
+    
+    import multiprocessing as mp
+    p = mp.Pool(processes = 20)
+    dicts = p.map(constructDic,liaisonData)
+    
+    def merge_dicts(dic_list):
+    
+        result = {}
+        for dictionary in dic_list:
+            result.update(dictionary)
+        return result
+    
+    dicTissueExp = merge_dicts(dicts)
+    return dicTissueExp
+    
+
+
+
+
+
+
+def scratchPlusView2():
     sraTable1 = pd.read_csv('./data/SraRunTable-GTEX1.txt',sep=',')
     sraTable2 = pd.read_csv('./data/SraRunTable-GTEX2.txt',sep=',')
     sraTable3 = pd.read_csv('./data/SraRunTable-GTEX3.txt',sep=',')
@@ -124,7 +209,7 @@ def loadPlusView():
     import bz2
     import _pickle as cpickle
     import pickle
-    with bz2.BZ2File('dicTissueExp1.pbz2','rb') as f1:
+    with bz2.BZ2File('dicTissueExp2.pbz2','rb') as f1:
          dicTissueExp = cpickle.load(f1)  
     end = process_time()
     
@@ -132,13 +217,12 @@ def loadPlusView():
     return dicTissueExp
 
 
-def inspectGTEx(event,tissue='all',plot=True):
+def inspectGTEx(dicTissueExp,event,tissue='all',plot=True):
     flag = 0
     import warnings
     warnings.filterwarnings("ignore")
     import matplotlib.pyplot as plt
     import numpy as np
-    global dicTissueExp
     if tissue=='all':
         tissueExp = dicTissueExp[event]
         for tis,exp in tissueExp.items():
@@ -175,9 +259,10 @@ def usage():
 
 
     print('Usage:')
-    print('python3 queryGTEx.py -e KYAT3:ENSG00000137944:E4.1-I4.1_88965413|ENSG00000137944:E4.1-E5.1 -m savage -t Prostate -p True')
+    print('python3 queryGTEx.py -e KYAT3:ENSG00000137944:E4.1-I4.1_88965413 -b ENSG00000137944:E4.1-E5.1 -m savage -t Prostate -p True')
     print('Options:')
     print('-e --event : Splicing event you want to interrogate')
+    print('-b --back: background event')
     print('-m --mode : load off-the-shelf GTEx data or generating it from scratch')
     print('-t --tissue : tissue-specific abundance you want to inspect')
     print('-p --plot : Do you want to plot all tissue-specific expression bar charts?')
@@ -186,22 +271,22 @@ def usage():
 
 def main(event,mode,tissue='all',plot=True):
     if mode == 'denovo':
-        dicTissueExp = scratchPlusView()
+        dicTissueExp = scratchPlusView1()
     if mode == 'savage':
         print('Please wait for around 10 min to load the GTEx Data')
         dicTissueExp = loadPlusView()
-    flag = inspectGTEx(event,tissue='all',plot=True)
+    flag = inspectGTEx(dicTissueExp,event,tissue,plot)
     return flag
 
 if __name__ == '__main__':
     import getopt
     import sys
-    log_err = open('queryGTEx.stderr.log','a')
-    log_out = open('queryGTEx.stdout.log','a')
-    sys.stderr = log_err
-    sys.stdout = log_out
+#    log_err = open('queryGTEx.stderr.log','a')
+#    log_out = open('queryGTEx.stdout.log','a')
+#    sys.stderr = log_err
+#    sys.stdout = log_out
     try:
-        options, remainder = getopt.getopt(sys.argv[1:],'he:m:t:p:',['help','event=','mode=','tissue=','plot='])
+        options, remainder = getopt.getopt(sys.argv[1:],'he:b:m:t:p:',['help','event=','back=','mode=','tissue=','plot='])
     except getopt.GetoptError as err:
         print('ERROR:', err)
         usage()
@@ -209,7 +294,10 @@ if __name__ == '__main__':
     for opt, arg in options:
         if opt in ('-e','--event'):
             event = arg
-            print('Queried splicing event:', arg)
+            print('Queried examined splicing event:', arg)
+        elif opt in ('-b','--back'):
+            back = arg
+            print('Background event:', arg)
         elif opt in ('-m','--mode'):
             mode = arg
             print('Choose the mode to obtain GTEx data',arg)
@@ -222,8 +310,8 @@ if __name__ == '__main__':
         elif opt in ('--help','-h'):
             usage() 
             sys.exit() 
-            
-    flag = main(event,mode,tissue,plot)
+    full = event + '|' + back        
+    flag = main(full,mode,tissue,plot)
     
     
 

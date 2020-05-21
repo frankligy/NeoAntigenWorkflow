@@ -39,6 +39,32 @@ def toFasta(list_):
             
 toFasta(b)
         
+
+
+
+no_digestion = pd.read_csv('/Users/ligk2e/Downloads/peptide_no_digestion.txt',sep='\t',header=None)
+pep = no_digestion[0].tolist()
+
+import pickle
+with open('/Users/ligk2e/Downloads/btotal.p','rb') as f1:
+    btotal = pickle.load(f1)
+ 
+pos = []
+for mer in btotal:
+    for pe in pep:
+        if mer == pe: pos.append(mer)
+
+
+
+
+
+
+
+
+
+
+
+
         
 junction = pd.read_csv('./resultMHC/NeoJunction_11_new.txt',sep='\t',usecols=['exam_seq'])   
 junction_intact = [item.replace(',','') for item in junction['exam_seq'].tolist()]

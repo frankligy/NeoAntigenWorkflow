@@ -1,0 +1,10 @@
+Biopython
+requests
+xmltodict
+pathos
+numpy
+pandas
+matplotlib
+
+
+

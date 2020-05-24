@@ -299,7 +299,7 @@ class NeoJ(Meta):
             if merList == ['MANNUAL']: merList = self.df['mannual'].tolist()[i]
             #print(merList)
             netMHCpan.pepFile(merList) # get query.pep file
-            machine = netMHCpan('./resultMHC/temp/query{}.pep'.format(os.getpid()),HLA,pathSoftWare,self.mer,mode,sb,wb)
+            machine = netMHCpan(os.path.join(outFolder,'resultMHC','temp','query{}.pep'.format(os.getpid())),HLA,pathSoftWare,self.mer,mode,sb,wb)
             dic = machine.seperator()
 
             col.append(dic)
@@ -323,7 +323,9 @@ class netMHCpan():
         result = []
         [result.extend(item) for item in lis if isinstance(item,list)]
         result = list(set(result))
-        with open('./resultMHC/temp/query{}.pep'.format(os.getpid()),'w') as f1:
+        if not os.path.exists(os.path.join(outFolder,'resultMHC')): os.makedirs(os.path.join(outFolder,'resultMHC'))
+        if not os.path.exists(os.path.join(outFolder,'resultMHC','temp')): os.makedirs(os.path.join(outFolder,'resultMHC','temp'))
+        with open(os.path.join(outFolder,'resultMHC','temp','query{}.pep'.format(os.getpid())),'w') as f1:
             [f1.write('{}\n'.format(mer)) for mer in result]
         # now we have query.pep file
     
@@ -340,22 +342,22 @@ class netMHCpan():
 
     
     def runSoftWareI(self):
-        with open('./resultMHC/temp/resultI{}.txt'.format(os.getpid()),'w') as f3:
+        with open(os.path.join(outFolder,'resultMHC','temp','resultI{}.pep'.format(os.getpid())),'w') as f3:
             subprocess.run([self.pathSoftWare,'-p',self.intFile, '-BA','-a',self.HLA,'-rth', str(self.sb), '-rlt', str(self.wb), '-l',str(self.length),'-t',str(self.wb)],stdout=f3)        
        # will generate a result file  
     
     def runSoftWareII(self):
-        with open('./resultMHC/temp/resultII{}.txt'.format(os.getpid()),'w') as f4:
+        with open(os.path.join(outFolder,'resultMHC','temp','resultII{}.pep'.format(os.getpid())),'w') as f4:
             subprocess.run([self.pathSoftWare,'-f',self.intFile,'-inptype', '1', '-a',self.HLA,'-length',str(self.length)],stdout=f4)
     
     def postFileII(self):
-        with open('./resultMHC/temp/resultII{}.txt'.format(os.getpid()),'r') as f5,open('./resultMHC/temp/resultII_parse{}.txt'.format(os.getpid()),'w') as f6:
+        with open(os.path.join(outFolder,'resultMHC','temp','resultII{}.pep'.format(os.getpid())),'r') as f5,open(os.path.join(outFolder,'resultMHC','temp','resultII_parse{}.pep'.format(os.getpid())),'w') as f6:
             for line in f5:
                 if line.startswith('#') or line.startswith('-') or line.strip('\n') == '':continue
                 elif re.search(r'^\w+',line): continue
                 elif re.search(r'Pos',line): continue
                 else: f6.write(line)
-        try:df=pd.read_csv('./resultMHC/temp/resultII_parse{}.txt'.format(os.getpid()),sep='\s+',header=None,index_col=0,names=[str(i+1) for i in range(11)])
+        try:df=pd.read_csv(os.path.join(outFolder,'resultMHC','temp','resultII_parse{}.pep'.format(os.getpid())),sep='\s+',header=None,index_col=0,names=[str(i+1) for i in range(11)])
         except pd.errors.EmptyDataError: dic = 'No candidates'
         else:
             hlaAllele = df['2'].tolist()  # HLA Allele
@@ -380,13 +382,13 @@ class netMHCpan():
     
     def postFileI(self):
         # HLA = 'HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01'
-        with open('./resultMHC/temp/resultI{}.txt'.format(os.getpid()),'r') as f1, open('./resultMHC/temp/resultI_parse{}.txt'.format(os.getpid()),'w') as f2:
+        with open(os.path.join(outFolder,'resultMHC','temp','resultI{}.pep'.format(os.getpid())),'r') as f1, open(os.path.join(outFolder,'resultMHC','temp','resultI_parse{}.pep'.format(os.getpid())),'w') as f2:
             for line in f1:
                 if line.startswith('#') or line.startswith('-') or line.strip('\n') == '': continue
                 elif re.search(r'^\w+',line): continue
                 elif re.search(r'Pos',line): continue
                 else: f2.write(line)
-        try:df = pd.read_csv('./resultMHC/temp/resultI_parse{}.txt'.format(os.getpid()),sep='\s+', header=None,index_col=0)  
+        try:df = pd.read_csv(os.path.join(outFolder,'resultMHC','temp','resultI_parse{}.pep'.format(os.getpid())),sep='\s+', header=None,index_col=0)  
         except pd.errors.EmptyDataError: dic = 'No candidates'   
         else:
             hlaAllele = df[1].tolist()  # HLA Allele
@@ -865,8 +867,13 @@ def subexon_tran(subexon,EnsID,dict_exonCoords,dict_fa,flag): # flag means if it
                 attrs = dict_exonCoords[fusionGeneEnsID][subexon]
                 exon_seq = query_from_dict_fa(dict_fa,suffix,attrs[3],fusionGeneEnsID,attrs[1])
             else:    # ENSG:E2.1
-                attrs = dict_exonCoords[fusionGeneEnsID][fusionGeneExon]
-                exon_seq = query_from_dict_fa(dict_fa,attrs[2],attrs[3],fusionGeneEnsID,attrs[1])
+                try:
+                    attrs = dict_exonCoords[fusionGeneEnsID][fusionGeneExon]
+                except KeyError:
+                    exon_seq = '***********************'
+                    print('{0} does not include in {1} exonlists'.format(fusionGeneExon,fusionGeneEnsID))
+                else:   
+                    exon_seq = query_from_dict_fa(dict_fa,attrs[2],attrs[3],fusionGeneEnsID,attrs[1])
         else:
             try:   #E2.1_67878789798
                 suffix = subexon.split('_')[1]
@@ -878,9 +885,11 @@ def subexon_tran(subexon,EnsID,dict_exonCoords,dict_fa,flag): # flag means if it
                 try:
                     attrs = dict_exonCoords[EnsID][subexon]
                 except KeyError:
-                    chrUTR,strandUTR = utrAttrs(EnsID,dict_exonCoords)
-                    exon_seq = utrJunction(suffix,EnsID,strandUTR,chrUTR,flag)  
                     print('{0} observes an UTR event {1}'.format(EnsID,subexon))
+                    chrUTR,strandUTR = utrAttrs(EnsID,dict_exonCoords)
+
+                    exon_seq = utrJunction(suffix,EnsID,strandUTR,chrUTR,flag)  
+
                 else:
                     if flag == 'site2':           
                         exon_seq = query_from_dict_fa(dict_fa,suffix,attrs[3],EnsID,attrs[1])  # chr,strand, start,end
@@ -891,21 +900,23 @@ def subexon_tran(subexon,EnsID,dict_exonCoords,dict_fa,flag): # flag means if it
 def utrJunction(site,EnsGID,strand,chr_,flag):  # U0.1_438493849, here 438493849 means the site
     if flag == 'site1' and strand == '+':  # U0.1_438493849 - E2.2
         otherSite = int(site) - 100 + 1   # extract UTR with length = 100
-        exon_seq = query_from_dict_fa(dict_fa,otherSite,site,EnsGID,strand)
-    elif flag == 'site1' and strand == '-':
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(otherSite),int(site))
+    elif flag == 'site1' and strand == '-':    # 438493849 is the coordinates in forward strand
         otherSite = int(site) + 100 - 1 
-        exon_seq = query_from_dict_fa(dict_fa,site,otherSite,EnsGID,strand)
-        if exon_seq == '': 
-            exon_seq = retrieveSeqFromUCSCapi(chr_,int(site),int(otherSite))
+        #exon_seq = query_from_dict_fa(dict_fa,site,otherSite,EnsGID,strand)    # site, otherSite must be coordinates in forward strand, strand argument will handle the conversion automatically
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(site),int(otherSite))
+        exon_seq = str(Seq(exon_seq,generic_dna).reverse_complement())
     elif flag == 'site2' and strand == '+':  # E5.3 - U5.4_48374838
         otherSite = int(site) + 100 -1
-        exon_seq = query_from_dict_fa(dict_fa,site,otherSite,EnsGID,strand)
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(site),int(otherSite))
     elif flag == 'site2' and strand == '-':
         otherSite = int(site) - 100 + 1
-        exon_seq = query_from_dict_fa(dict_fa,otherSite,site,EnsGID,strand)
+        #print(EnsGID,chr_,site,otherSite)
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(otherSite),int(site))
+        exon_seq = str(Seq(exon_seq,generic_dna).reverse_complement())
     return exon_seq
 
-def utrAttrs(EnsID,dict_exonCoords):
+def utrAttrs(EnsID,dict_exonCoords):  # try to get U0.1's attribute, but dict_exonCoords doesn't have, so we just wanna get the first entry for its EnsGID
     exonDict = dict_exonCoords[EnsID] 
     attrs = next(iter(exonDict.values()))
     chr_,strand = attrs[0],attrs[1]
@@ -918,7 +929,11 @@ def retrieveSeqFromUCSCapi(chr_,start,end):
     response = requests.get(url)
     status_code = response.status_code
     assert status_code == 200
-    my_dict = xmltodict.parse(response.content)
+    try:
+        my_dict = xmltodict.parse(response.content)
+    except:
+        print(chr_,start,end)
+        raise Exception('Sorry,please check above printed stuff')
     exon_seq = my_dict['DASDNA']['SEQUENCE']['DNA']['#text'].replace('\n','').upper()
     return exon_seq
     
@@ -1162,17 +1177,17 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     df = pd.read_csv(intFile,sep='\t') 
     print('finished loading input files\n')
     print('loading all existing transcripts files\n')
-    df_exonlist = pd.read_csv('./data/mRNA-ExonIDs.txt',sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
+    df_exonlist = pd.read_csv(os.path.join(dataFolder,'mRNA-ExonIDs.txt'),sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
     print('finished loading all existing transcripts files\n')
     print('loading all subexon coordinates files\n')
-    dict_exonCoords = exonCoords_to_dict('./data/Hs_Ensembl_exon.txt','\t')
+    dict_exonCoords = exonCoords_to_dict(os.path.join(dataFolder,'Hs_Ensembl_exon.txt'),'\t')
     print('finished loading all subexon coordinates files\n')
     print('loading exon sequence fasta files, 2GB\n')
-    dict_fa = fasta_to_dict('./data/Hs_gene-seq-2000_flank.fa')
+    dict_fa = fasta_to_dict(os.path.join(dataFolder,'Hs_gene-seq-2000_flank.fa'))
     print('finished loading exon sequence fasta files\n')
     print('converting subexon coordinates to a dictionary-Process\n')
     dictExonList = convertExonList(df_exonlist)
-    print('finished converting subexon coordinates to a dictionary-Process\n')
+    print('finished converting subexon coordinates to a dictionary\n')
     if mode == 'OncoSplice' and checkGTEx==True:
         dfori = pd.read_csv(EventAnnotationFile,sep='\t')
         dfgroup = pd.read_csv(GroupsFile,sep='\t',header=None,names=['TCGA-ID','group','label'])
@@ -1180,7 +1195,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
 
         start = process_time()
 
-        with bz2.BZ2File('dicTissueExp2.pbz2','rb') as f1:
+        with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
             dicTissueExp = cpickle.load(f1)  
             end = process_time()    
         print('consume {0}'.format(end-start))
@@ -1205,7 +1220,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     if mode == 'TumorAndControl' and checkGTEx == True:
         print('loading GTEx dataset, it will take 20 mins, please be patient')
         start = process_time()
-        with bz2.BZ2File('./data/dicTissueExp2.pbz2','rb') as f1:
+        with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
             dicTissueExp = cpickle.load(f1)  
             end = process_time()    
         print('consume {0}'.format(end-start))
@@ -1223,7 +1238,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     if mode == 'singleSample' and checkGTEx == True:
         print('loading GTEx dataset, it will take 20 mins, please be patient')
         start = process_time()
-        with bz2.BZ2File('dicTissueExp2.pbz2','rb') as f1:
+        with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
             dicTissueExp = cpickle.load(f1)  
             end = process_time()    
         print('consume {0}'.format(end-start))
@@ -1245,6 +1260,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
 
     df_split = np.array_split(dfNeoJunction, Core, axis=0)    # cut by rows, equally splited 
     obj_split = [NeoJ(df,k) for df in df_split]
+    print('start pooling\n')
     pool = Pool(Core)
     df_out_list = pool.map(run, obj_split)
     pool.close()
@@ -1261,10 +1277,12 @@ def usage():
 
 
     print('Usage:')
-    print('python3 mhcPresent.py -i ./Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt -t test -k 8 -H HLA-A29:02,HLA-B51:01,HLA-B54:01,HLA-B57:01 -s /data/salomonis2/LabFiles/Frank-Li/python3/netMHCpan-4.1/netMHCpan -M MHCI -m singleSample -C 8 -c False')
+    print('python3 mhcPresent.py -i /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events/Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt -t breast_all -o /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events -d /data/salomonis2/LabFiles/Frank-Li/python3/data -k 8 -H HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01 -s /data/salomonis2/LabFiles/Frank-Li/python3/netMHCpan-4.1/netMHCpan -M MHCI -m singleSample -C 8 -c False')
     print('Options:')
     print('-i : path of input file')
     print('-t : the name of your task')
+    print('-o : output folder')
+    print('-d : data folder')
     print('-k : Kmer')
     print('-H : queried HLA alleles')
     print('-s : full path for where netMHCpan sit')
@@ -1287,7 +1305,7 @@ if __name__ == "__main__":
 #    sys.stderr = log_err
 #    sys.stdout = log_out
     try:
-        options, remainder = getopt.getopt(sys.argv[1:],'hi:t:k:H:s:M:m:C:c:',['help','EventAnnotationFile=','GroupsFile='])
+        options, remainder = getopt.getopt(sys.argv[1:],'hi:t:o:d:k:H:s:M:m:C:c:',['help','EventAnnotationFile=','GroupsFile='])
     except getopt.GetoptError as err:
         print('ERROR:', err)
         usage()
@@ -1299,6 +1317,12 @@ if __name__ == "__main__":
         elif opt in ('-t'):
             taskName = arg
             print('give your task a name:',arg)
+        elif opt in ('-o'):
+            outFolder = arg
+            print('output folder:',arg)
+        elif opt in ('-d'):
+            dataFolder = arg
+            print('data folder:',arg)
         elif opt in ('-k'):
             k= int(arg)
             print('kmer:', arg)

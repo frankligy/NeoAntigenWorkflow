@@ -157,7 +157,58 @@ def inspectGTEx(event,tissue='all',plot=True):
 """        
         
         
+import pandas as pd
+import ast
+pep = pd.read_csv('/Users/ligk2e/Desktop/project_test/resultMHC/peptide_no_digestion.txt',header=None)[0].tolist()
+idx8,idx9,idx10,idx11=[],[],[],[]
+for item in pep:
+    length = len(item)
+    if length==8:
+        mer8_df = pd.read_csv('/Users/ligk2e/Desktop/project_test/resultMHC/NeoJunction_8_mark.txt',sep='\t')
+        mer8 = mer8_df['MHCIresult'].tolist()
+        for idx,candidate in enumerate(mer8):
+            if not candidate == 'No candidates':
+                candidate = ast.literal_eval(candidate)
+                candidate = candidate['HLA-A29:02']
+                if [item] in candidate: idx8.append(idx)
+
+    if length==9:
+        mer9_df = pd.read_csv('/Users/ligk2e/Desktop/project_test/resultMHC/NeoJunction_9_mark.txt',sep='\t')
+        mer9 = mer9_df['MHCIresult'].tolist()
+        for idx,candidate in enumerate(mer9):
+            if not candidate == 'No candidates':
+                candidate = ast.literal_eval(candidate)
+                candidate = candidate['HLA-A29:02']
+                if [item] in candidate: idx9.append(idx)
+       
+    if length==10:
+        mer10_df = pd.read_csv('/Users/ligk2e/Desktop/project_test/resultMHC/NeoJunction_10_mark.txt',sep='\t')
+        mer10 = mer10_df['MHCIresult'].tolist()
+        for idx,candidate in enumerate(mer10):
+            if not candidate == 'No candidates':
+                candidate = ast.literal_eval(candidate)
+                candidate = candidate['HLA-A29:02']
+                if [item] in candidate: idx10.append(idx)
+   
+    if length==11:
+        mer11_df = pd.read_csv('/Users/ligk2e/Desktop/project_test/resultMHC/NeoJunction_11_mark.txt',sep='\t')
+        mer11 = mer11_df['MHCIresult'].tolist()
+        for idx,candidate in enumerate(mer11):
+            if not candidate == 'No candidates':
+                candidate = ast.literal_eval(candidate)
+                candidate = candidate['HLA-A29:02']
+                if [item] in candidate: idx11.append(idx)
+
         
+new8_df = mer8_df.iloc[idx8]
+new9_df = mer9_df.iloc[idx9] 
+new10_df = mer10_df.iloc[idx10] 
+new11_df = mer11_df.iloc[idx11] 
+new = pd.concat([new8_df,new9_df,new10_df,new11_df])
+
+
+
+    
         
         
         

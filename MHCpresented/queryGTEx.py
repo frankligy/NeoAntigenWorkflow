@@ -8,6 +8,8 @@ Created on Sun May 17 12:27:22 2020
 import os
 #os.chdir('/Users/ligk2e/Desktop/project_test')
 import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
 
 def scratchPlusView1():
 
@@ -221,8 +223,7 @@ def inspectGTEx(dicTissueExp,event,tissue='all',plot=True):
     flag = 0
     import warnings
     warnings.filterwarnings("ignore")
-    import matplotlib.pyplot as plt
-    import numpy as np
+
     if tissue=='all':
         tissueExp = dicTissueExp[event]
         for tis,exp in tissueExp.items():
@@ -235,6 +236,7 @@ def inspectGTEx(dicTissueExp,event,tissue='all',plot=True):
                     plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
                     plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
                     plt.legend()
+                    if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
                     plt.savefig('./GTEx/{1}.pdf'.format(event,tis),bbox_inches='tight')
                     plt.close(fig)
                 else: continue
@@ -250,6 +252,7 @@ def inspectGTEx(dicTissueExp,event,tissue='all',plot=True):
         elif np.any(exp):   # have non-zero element
             plt.bar(np.arange(len(exp)),exp,width=0.2,label='tissue')
             plt.legend()
+            if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
             plt.savefig('./{}.pdf'.format(tissue),bbox_inches='tight')
             plt.show()
             print(expression)

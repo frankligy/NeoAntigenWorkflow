@@ -7,35 +7,32 @@ Created on Mon Mar 16 19:43:43 2020
 """
 
 import os
-os.chdir('/Users/ligk2e/Desktop/project_breast/RBM47/')
+os.chdir('/Users/ligk2e/Desktop/project_LUAD')
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
 import pandas as pd
 from decimal import Decimal as D
-#import pickle
+import pickle
 import regex
 import re
 from time import process_time
 import collections
-#import ast
 import matplotlib.pyplot as plt
 import math
+import urllib.parse
+import urllib.request
+import requests
+import xmltodict
 
 ############################################################################################
 # part1: branch2.py, match to existing peptides
 #############################################################################################
 
-def RatingFunction(x):   # dPSI is float64 type
-    if x > 0:
-        return True  # anything like good/bad, because you still need to use a == good to slice the datafrome
-    else:
-        return False # or use lambda function
+
 
 def GetIncreasedPart(df):
-    df['sign'] = df['dPSI'].apply(lambda x: True if x>0 else False) # x = lambda a,b:a+b; x(5,6)
-    # Method2: apply(RatingFunction) 
-    # Method3: list comprehension, see main function example when got extracellular instances    
+    df['sign'] = df['dPSI'].apply(lambda x: True if x>0 else False) # x = lambda a,b:a+b; x(5,6)   
     df_ori = df[df['sign']==True]
     df_ori = df_ori.drop(columns=['sign'])  # how to drop a column
     return df_ori
@@ -44,30 +41,32 @@ def GetIncreasedPart(df):
 
 
 def UID(df, i):
-    uid = list(df['UID'])[i]
-    #uid = uid.split(':')[1]
+    uid = list(df['UID'])[i]       
     gene = uid.split(':')[0]
     dict = {}
-    gene = gene + ':' + uid.split('|')[1].split(':')[0]
+    gene = gene + ':' + uid.split('|')[1].split(':')[0] # slicing the ENSG in background event
     x = uid.split('|')
-    dict[gene] = [x[0].split(':')[2]]
-    dict[gene].append(x[1].split(':')[1])
-    #print ((uid.split('|')[0],gene + ':' + uid.split('|')[1]))
-    #return ((uid.split('|')[0],gene + ':' + uid.split('|')[1]))
-    #print dict
-    #{'gene:ENSid':[E22-33,E34-56]}
+    try: x[0].split(':')[3]
+    except IndexError: event = x[0].split(':')[2]
+    else: event = str(x[0].split(':')[2])+':'+str(x[0].split(':')[3])
+    finally: dict[gene] = [event]
+    
+    try: x[1].split(':')[2]
+    except IndexError: backEvent = x[1].split(':')[1]
+    else: backEvent = str(x[1].split(':')[1])+':'+str(x[1].split(':')[2])
+    finally: dict[gene].append(backEvent)
+
+    #{'gene:ENSid':[E22-E33,E34-E56]}
+    # if fusion gene: E22-ENSG:E31
     return dict
 
 def match_with_exonlist(df_ori,df_exonlist,dict_exonCoords):
-#    sum = 0
     col1 = []
     col2 = []
     
     for i in range(df_ori.shape[0]):
         temp=UID(df_ori,i)
         EnsID=list(temp.keys())[0].split(':')[1]
-#        Exons_examined = exon_update(temp,0,EnsID)
-#        Exons_back = exon_update(temp,1,EnsID)
         Exons_examined = exon_extract(temp,0,EnsID)
         Exons_back = exon_extract(temp,1,EnsID)
         col1.append(core_match(df_exonlist,dict_exonCoords,EnsID,Exons_examined))
@@ -103,18 +102,14 @@ def core_match(df_exonlist,dict_exonCoords,EnsID,Exons):
    
     try:
         df_certain = df_exonlist[df_exonlist['EnsGID'] == EnsID]
-    except:
-#        final_fullAA = []
-#        peek_pep = []
-        full_transcript_store = []
-        
-#    final_fullAA = []
-#    peek_pep = []
+    except: full_transcript_store = []  # EnsGID is absent in df_exonlist
     full_transcript_store = []
     for item in list(df_certain['Exons']):
         full_transcript=''
-#        splicing_transcript=''
-        if Exons in item:
+        Exons1 = '|' + Exons
+        Exons2 = Exons + '|'
+        
+        if re.search(rf'{re.escape(Exons1)}',item) or re.search(rf'{re.escape(Exons2)}',item) or re.search(rf'{re.escape(Exons)}$',item):
             Exonlist = item.split('|')
             for j in range(len(Exonlist)):
                 coords = dict_exonCoords[EnsID][Exonlist[j]]
@@ -131,18 +126,10 @@ def core_match(df_exonlist,dict_exonCoords,EnsID,Exons):
                     # expression of minus strand, need to draw an illustrator to visulize that.
                 full_transcript += frag
             full_transcript = full_transcript.replace('\n','')
-#            splicing_transcript = full_transcript.replace('\n','')
             full_transcript_store.append(full_transcript)   
-#            pot_fullAA=mich.translate(full_transcript)
-#            peek_pep.append(pot_fullAA)
-#            max_fullAA=find_longest_AA(list(pot_fullAA.values()))
-#            final_fullAA.append(max_fullAA)
-        else:
-#            peek_pep.append('')
-#            final_fullAA.append('')
+        else: 
             full_transcript_store.append('')
-#    result = [final_fullAA,peek_pep,full_transcript_store]
-    return full_transcript_store
+    return full_transcript_store  # ['','ATTTTT','TTTGGCC'], # [] if EnsGID is not present in exonlist
 
 
 def check_exonlist_general(exonlist,index,strand):
@@ -160,15 +147,11 @@ def check_exonlist_general(exonlist,index,strand):
     query_exon_num = query.split('.')[0]   #E14.1
     query_subexon_num = int(query.split('.')[1])   #2, it is a int
     if strand == '+':
-        if str(query_subexon_num + 1) in dict[query_exon_num]:
-            return False
-        else:
-            return True
+        if str(query_subexon_num + 1) in dict[query_exon_num]: return False
+        else: return True
     else:
-        if str(query_subexon_num + 1) in dict[query_exon_num]:
-            return False
-        else:
-            return True
+        if str(query_subexon_num + 1) in dict[query_exon_num]: return False
+        else: return True
         
         
         
@@ -255,40 +238,6 @@ def score_coding_bias(sequence):
     
 
 
-def readingframe2peptide(frame_dict):
-    frag_comp_array = []
-    for pep_seq in frame_dict.values():
-        frag_array1 = pep_seq.split('*')
-        for frag in frag_array1:
-            if 'M' not in frag or len(frag) == 0:
-                continue
-            else:
-                index_M = frag.index('M')
-                frag_comp = frag[index_M:]
-                frag_comp_array.append(frag_comp)
-    #print(frag_comp_array)
-    #pick most likely one: length, GC content, coding frequency
-    max_seq = ''
-    max_length = 0
-    max_item_score = 0
-    #global count
-    for item in frag_comp_array:
-        temp1 = len(item)
-        add_score = score_GC(item)
-        if temp1 > max_length:
-            max_length = temp1
-            max_item_score = add_score
-            max_seq = item
-        elif temp1 == max_length:
-            if add_score > max_item_score:
-                max_length = temp1
-                max_item_score = add_score
-                max_seq = item
-            elif add_score == max_item_score:
-                #count += 1
-                print('Even considering GC and coding frequency are not able to differentiate them')            
-    return max_seq
-
 def transcript2peptide(cdna_sequence):
     # TAA,TGA,TAG
     # tips: find/index and split function && their corresponding re version for multiple stirng
@@ -320,7 +269,7 @@ def transcript2peptide(cdna_sequence):
     max_seq = ''
     max_length = 0
     max_item_score = 0
-#    global count
+
     for item in frag_comp_array:
         temp1 = len(item)
         add_score = score_GC(item) + score_coding_bias(item)
@@ -333,10 +282,8 @@ def transcript2peptide(cdna_sequence):
                 max_length = temp1
                 max_item_score = add_score
                 max_seq = item
-            else:
-#                count += 1
-                print('equal length but less likely to be a true ORF or longer length but less likely to be a true ORF',
-                      add_score,max_item_score) 
+#            else:
+#                print('length diffs within 8, add_score is not able to overturn current max one') 
     max_seq_tran = max_seq
     max_seq_aa = str(Seq(max_seq,generic_dna).translate(to_stop=False))
     max_seq_final = [max_seq_tran,max_seq_aa,frag_comp_array]
@@ -358,33 +305,26 @@ def pos_to_frags(pos,sequence):
     return frag_array
         
     
-def final_conversion(col):
-#    with open(col_pickle_file,'rb') as col_file:
-#        col = pickle.load(col_file)
+def final_conversion(col):   # get most likely ORF
     output_array_aa = []
     output_array_tran = []
-#    output_peek = []
+
     for event in col:
         temp_array_aa = []
         temp_array_tran = []
-#        temp_peek = []
+
         for transcript in event:
             if transcript == '':
                 temp_array_aa.append(transcript)
                 temp_array_tran.append(transcript)
-#                temp_peek.append(transcript)
             else:
                 max_pep = transcript2peptide(transcript)[1]
                 max_tran = transcript2peptide(transcript)[0]
-#                peek = transcript2peptide(transcript)[2]
                 temp_array_aa.append(max_pep)
                 temp_array_tran.append(max_tran)
-#                temp_peek.append(peek)
         output_array_aa.append(temp_array_aa)
         output_array_tran.append(temp_array_tran)
-#        output_peek.append(temp_peek)
-        output_array = [output_array_aa,output_array_tran]
-    return output_array           
+    return output_array_tran,output_array_aa           
 
 
 def exonCoords_to_dict(path,delimiter):
@@ -422,48 +362,109 @@ def find_longest_AA(listAA):
 # part3: following.py   find the junction sites' sequence.   
 #################################################################################################
 
-def retrieve_junction_site(df_ori):
+def retrieveJunctionSite(df,dict_exonCoords,dict_fa):
     exam_seq,back_seq = [],[]
-    for i in range(df_ori.shape[0]):
-        temp = UID(df_ori,i)
+    for i in range(df.shape[0]):
+        temp = UID(df,i)
         EnsID = list(temp.keys())[0].split(':')[1]
         exam_site = list(temp.values())[0][0]
         back_site = list(temp.values())[0][1]
         exam_site_1 = subexon_tran(exam_site.split('-')[0],EnsID,dict_exonCoords,dict_fa,'site1')
         exam_site_2 = subexon_tran(exam_site.split('-')[1],EnsID,dict_exonCoords,dict_fa,'site2')
-        exam_seq.append(exam_site_1 + exam_site_2)
+        exam_seq_join = ','.join([exam_site_1,exam_site_2])
+        exam_seq.append(exam_seq_join)
         back_site_1 = subexon_tran(back_site.split('-')[0],EnsID,dict_exonCoords,dict_fa,'site1')
         back_site_2 = subexon_tran(back_site.split('-')[1],EnsID,dict_exonCoords,dict_fa,'site2')
-        back_seq.append(back_site_1 + back_site_2)
+        back_seq_join = ','.join([back_site_1,back_site_2])
+        back_seq.append(back_seq_join)
         
-    df_ori['exam_seq'] = exam_seq
-    df_ori['back_seq'] = back_seq
-    return df_ori
+    df['exam_seq'] = exam_seq
+    df['back_seq'] = back_seq
+    return df
         
         
 def subexon_tran(subexon,EnsID,dict_exonCoords,dict_fa,flag): # flag means if it is site_1 or site_2
     try:
         attrs = dict_exonCoords[EnsID][subexon]
         exon_seq = query_from_dict_fa(dict_fa,attrs[2],attrs[3],EnsID,attrs[1])  
-    except:
-#        print(subexon,'t')
-        try:
-            suffix = subexon.split('_')[1]
-        except:
-            exon_seq = '*'   # '*' means possible gene fusion
-            print(subexon,'possible fusion gene event',EnsID)   # normal subexon without cognate coordinate in dict will fall here
+    except KeyError:
+        if ':' in subexon:   #fusion gene
+            fusionGeneEnsID = subexon.split(':')[0] # this kind of subexon must be site2
+            fusionGeneExon = subexon.split(':')[1]
+            if  '_' in fusionGeneExon:   # ENSG:E2.1_473843893894
+                suffix = fusionGeneExon.split('_')[1]
+                subexon = fusionGeneExon.split('_')[0]
+                attrs = dict_exonCoords[fusionGeneEnsID][subexon]
+                exon_seq = query_from_dict_fa(dict_fa,suffix,attrs[3],fusionGeneEnsID,attrs[1])
+            else:    # ENSG:E2.1
+                try:
+                    attrs = dict_exonCoords[fusionGeneEnsID][fusionGeneExon]
+                except KeyError:
+                    exon_seq = '***********************'
+                    print('{0} does not include in {1} exonlists'.format(fusionGeneExon,fusionGeneEnsID))
+                else:   
+                    exon_seq = query_from_dict_fa(dict_fa,attrs[2],attrs[3],fusionGeneEnsID,attrs[1])
         else:
-            subexon = subexon.split('_')[0]
-            try:
-                attrs = dict_exonCoords[EnsID][subexon]
-            except:
-                exon_seq = '#'   # '# means 'U0.1_32130925'
-                print(subexon,'splicing occurs in UTR',EnsID)
+            try:   #E2.1_67878789798
+                suffix = subexon.split('_')[1]
+            except IndexError:
+                exon_seq = '***********************'   
+                print('{0} does not include in {1} exonlists'.format(subexon,EnsID))
             else:
-                if flag == 'site2':           
-                    exon_seq = query_from_dict_fa(dict_fa,suffix,attrs[3],EnsID,attrs[1])  # chr,strand, start,end
-                elif flag == 'site1':
-                    exon_seq = query_from_dict_fa(dict_fa,attrs[2],suffix,EnsID,attrs[1])
+                subexon = subexon.split('_')[0]
+                try:
+                    attrs = dict_exonCoords[EnsID][subexon]
+                except KeyError:
+                    print('{0} observes an UTR event {1}'.format(EnsID,subexon))
+                    chrUTR,strandUTR = utrAttrs(EnsID,dict_exonCoords)
+
+                    exon_seq = utrJunction(suffix,EnsID,strandUTR,chrUTR,flag)  
+
+                else:
+                    if flag == 'site2':           
+                        exon_seq = query_from_dict_fa(dict_fa,suffix,attrs[3],EnsID,attrs[1])  # chr,strand, start,end
+                    elif flag == 'site1':
+                        exon_seq = query_from_dict_fa(dict_fa,attrs[2],suffix,EnsID,attrs[1])
+    return exon_seq
+
+def utrJunction(site,EnsGID,strand,chr_,flag):  # U0.1_438493849, here 438493849 means the site
+    if flag == 'site1' and strand == '+':  # U0.1_438493849 - E2.2
+        otherSite = int(site) - 100 + 1   # extract UTR with length = 100
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(otherSite),int(site))
+    elif flag == 'site1' and strand == '-':    # 438493849 is the coordinates in forward strand
+        otherSite = int(site) + 100 - 1 
+        #exon_seq = query_from_dict_fa(dict_fa,site,otherSite,EnsGID,strand)    # site, otherSite must be coordinates in forward strand, strand argument will handle the conversion automatically
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(site),int(otherSite))
+        exon_seq = str(Seq(exon_seq,generic_dna).reverse_complement())
+    elif flag == 'site2' and strand == '+':  # E5.3 - U5.4_48374838
+        otherSite = int(site) + 100 -1
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(site),int(otherSite))
+    elif flag == 'site2' and strand == '-':
+        otherSite = int(site) - 100 + 1
+        #print(EnsGID,chr_,site,otherSite)
+        exon_seq = retrieveSeqFromUCSCapi(chr_,int(otherSite),int(site))
+        exon_seq = str(Seq(exon_seq,generic_dna).reverse_complement())
+    return exon_seq
+
+def utrAttrs(EnsID,dict_exonCoords):  # try to get U0.1's attribute, but dict_exonCoords doesn't have, so we just wanna get the first entry for its EnsGID
+    exonDict = dict_exonCoords[EnsID] 
+    attrs = next(iter(exonDict.values()))
+    chr_,strand = attrs[0],attrs[1]
+    return chr_,strand
+
+
+
+def retrieveSeqFromUCSCapi(chr_,start,end):
+    url = 'http://genome.ucsc.edu/cgi-bin/das/hg38/dna?segment={0}:{1},{2}'.format(chr_,start,end)
+    response = requests.get(url)
+    status_code = response.status_code
+    assert status_code == 200
+    try:
+        my_dict = xmltodict.parse(response.content)
+    except:
+        print(chr_,start,end)
+        raise Exception('Sorry,please check above printed stuff')
+    exon_seq = my_dict['DASDNA']['SEQUENCE']['DNA']['#text'].replace('\n','').upper()
     return exon_seq
 
 
@@ -485,44 +486,26 @@ def write_list_to_file(list):
         f1.writelines('%s\n' % EnsID_i for EnsID_i in list)
     return None
 
-def find_membrane_EnsID(conversion_table,uniprot_info):
-    dict_EnsID_uni = {}
-    for i in range(conversion_table.shape[0]):
-        dict_EnsID_uni[conversion_table['EnsID'][i]] = conversion_table['uniprot_entry'][i]
-    extracellular = []
-    for key in dict_EnsID_uni.keys():
-        if dict_EnsID_uni[key] in list(uniprot_info['Entry']):  # remember generator with list
-            extracellular.append(key)
-    return extracellular, dict_EnsID_uni
+
             
 
 def representative_tran_and_whole_tran(df):
-    # get the narrowed(3745-318) whole transcript from saved pickle file
-   
-    exam_col = col1
-    truth_table = [True if item in extracellular_gene else False for item in EnsID]
-    narrow_whole_tran = []
-    for i in range(len(truth_table)):
-        if truth_table[i]:
-            narrow_whole_tran.append(exam_col[i])
+
     # one on one to find correponding representative and their whole transcript        
     representative = []
     whole_tran = []
     position_array = []
     for i in range(df.shape[0]):
         event = list(df['exam_match_tran'])[i]
-#        event = ast.literal_eval(event)
         # initiate the condition to find the most likely representative
         flag = -1
         max_seq = ''
         max_length = 0
         max_item_score = 0
         position = 0    # how to use flag to record the position info and when to use index/item to loop
-        for tran in event:   
-            if len(tran) == 0:
-                flag += 1
+        for tran in event:  
+            flag += 1
             if not len(tran)==0: 
-                flag += 1
                 temp1 = len(tran)
                 add_score = score_GC(tran) + score_coding_bias(tran)
                 if (temp1 - max_length) >= 8:
@@ -546,71 +529,128 @@ def representative_tran_and_whole_tran(df):
             position_array.append(-1)
     
     return representative,whole_tran,position_array
-        #df['representative_tran'] = representative  
+ 
 
 
                         
 def check_if_good_representative(df):
-    condition_array = []
+    outer_condition_array = []
+    outer_condition_detail = []
+    
+    
     for i in range(df.shape[0]):
-        repre = list(df['representative_tran'])[i]
-        if repre:
-            junction = list(df['exam_seq'])[i]
-            whole = list(df['whole_tran'])[i]
-            start_repre = whole.find(repre)
-            end_repre = whole.find(repre) + len(repre)
-            
+        all_whole_tran = df['exam_match_whole_tran'].tolist()[i]
+        all_ORF_tran = df['exam_match_tran'].tolist()[i]
+        junction = df['exam_seq'].tolist()[i].replace(',','')
+        condition_array = []
+        for idx in range(len(all_whole_tran)):
+            whole = all_whole_tran[idx]
+            ORF = all_ORF_tran[idx]
+            if whole:
+                start_ORF = whole.find(ORF)
+                end_ORF = start_ORF + len(ORF)
+                start_junction = whole
     # we have to apply fuzzy matching, because junction consists of former part and latter part(i.e. E6.3|E8.1)
     # In my way to handle overlapping 1nt, the former one will always stay constant, but latter one in the whole
     # transcript, it might get trimmed but here we don't trim it, so there might be 1 overhang in jucntion seq.
     
-            pattern = regex.compile('(%s){d<=1}' % junction) 
-            start_junction = pattern.search(whole).span()[0]
-            end_junction = pattern.search(whole).span()[1] - 1
-            
-#            start_junction = whole.find(junction)
-#            end_junction = whole.find(junction) + len(junction)
-            if start_junction <= end_repre and end_junction >= start_repre:
-                condition_array.append(True)
+                pattern = regex.compile('(%s){d<=1}' % junction) 
+                try:
+                    start_junction = pattern.search(whole).span()[0]
+                except:
+                    print(df.iloc[i]['UID'],idx)
+                    raise Exception('bug')
+                end_junction = pattern.search(whole).span()[1] - 1
+
+                if start_junction <= end_ORF and end_junction >= start_ORF:
+                    condition_array.append(True)
+                else:
+                    condition_array.append(False)
             else:
                 condition_array.append(False)
-        else:
-            condition_array.append(False)
-    df['good_repre'] = condition_array
-    df_filtered = df[df['good_repre']==True]    # how to access all the column name and how to drop one column
-    return df_filtered
+        if sum(condition_array) == 0: outer_condition_array.append(False)
+        else: outer_condition_array.append(True)
+        outer_condition_detail.append(condition_array)
+    
+    df['involvement'] = outer_condition_detail
+    df['getTranslated'] = outer_condition_array
+    df_retained = df[df['getTranslated']==True]
+    df_retained = df_retained.drop(columns=['getTranslated']) 
+    df_filtered = df[df['getTranslated']==False] 
+    df_filtered = df_filtered.drop(columns=['getTranslated'])
+     # filter out events that can not match with existing ones, or events that could match but splicing site won't involve in ORF formation
+    return df_retained,df_filtered
             
-def alignment_to_uniprot(df,dict_fa,dict_EnsID_uni):
-    notebook = []
-    result_array = []
-    repre_aa_array = []
+def alignment_to_uniprot(df,dict_fa,Ens2ACC):
+    col1 = []
+    col2 = []
+    col3 = []
     for i in range(df.shape[0]):
+        # collect all uniprot-curated isoform protein sequence
+        target = {}
         EnsID = list(df['UID'])[i].split('|')[0].split(':')[1]
-        target_aa = dict_fa[dict_EnsID_uni[EnsID]]
-        repre_aa = str(Seq(list(df['representative_tran'])[i],generic_dna).translate(to_stop=False))
-    # shotgun and align
-        bucket = chop_sequence(repre_aa,10)
-        notes = []
-        for j in range(len(bucket)):
-            frag = bucket[j]
-            if frag in target_aa:
-                notes.append(True)
-            else:
-                notes.append(False)
-        result = neoantigen_iden(notes)
-        notebook.append(notes)
-        result_array.append(result)
-        repre_aa_array.append(repre_aa)
-    return notebook,result_array,repre_aa_array
+        ACCID = Ens2ACC[EnsID] 
+        isoforms = list(dict_uni_fa.keys())  # ['Q9NR97','Q9NR97-2'...]
+        for iso in isoforms:        
+            if ACCID in iso: 
+                seq = dict_uni_fa[iso]
+                target[iso] = seq
+        # collect all mine-predicted isoform protein sequence
+        involve = df['involvement'].tolist()[i]  # [True,False,False,True] indicate which transcript would be a good representative
+        match_aa = df['exam_match_aa'].tolist()[i]
+        repre = []
+        for idx,aa in enumerate(match_aa):
+            if involve[idx] == True:   # only consider aa that is caused by splicing event
+                bucket = chop_sequence(aa,10)   # chopping
+                subnotes = {}
+                for j in range(len(bucket)):   # for each 10mer
+                    frag = bucket[j]
+                    for key,value in target.items():   # for each curated isoform
+                        try: 
+                            subnotes[key].append(True) if frag in value else subnotes[key].append(False)
+                        except KeyError:
+                            subnotes[key] = []
+                            subnotes[key].append(True) if frag in value else subnotes[key].append(False)
+                for k,m in subnotes.items():   # k is key, m is value
+                    if sum(m)==0: subnotes[k].append('notAligned')
+                    elif sum(m)==len(m): subnotes[k].append('totallyAligned')
+                    else: subnotes[k].append('partiallyAligned')
+                repre.append(subnotes)
+            elif involve[idx] == False:
+                repre.append('Either splicing site is not involved in ORF formation or splicing event is novel event')
+        col1.append(repre)
+        # define what kind of peptide this splicing sites would generate by interogratting each repre list
+        identity = []
+        for n in repre:
+            definition = ''
+            if isinstance(n,dict):
+                for p in n.values():   #n will be {'P14061':[True,True,False,'partiallyAligned'],'P14061-2':[True,True,False,'partiallyAligned']}
+                    if p[-1] == 'totallyAligned':  
+                        definition = 'one of already documented isoforms'
+                        break
+            else: 
+                definition = 'Either splicing site is not involved in ORF formation or splicing event is novel event'
+            if definition == '': definition = 'novel isoform'
+            identity.append(definition)
+        col2.append(identity)
+        # let's see if it is possible to generate any novel isoform
+        crystal = False
+        for idx,w in enumerate(identity):
+            if w == 'novel isoform': 
+                crystal = True  # we need look into that
+                col3.append(crystal)
+                break
+        if crystal == False: col3.append(crystal) # no need to look into this event anymore
+            
         
-def neoantigen_iden(notes):
-    if sum(notes) > 0 and sum(notes) < len(notes):
-        result = 'partially aligned'
-    elif sum(notes) == 0:
-        result = 'not aligned'
-    elif sum(notes) == len(notes):
-        result = 'totally aligned'
-    return result
+    df['alignment'] = col1
+    df['identity'] = col2
+    try:df['interest'] = col3
+    except: 
+        print(col3)
+        raise Exception('hi')
+    return df
+
     
           
 
@@ -676,103 +716,112 @@ def PlotChroScarse(chro_dict,path):
     fig.savefig(path)
     plt.close(fig)
     
+def IDmappingACC2Ensembl(lis,mannual=False):  
+    if os.path.exists('Ens2ACC.p'): 
+        with open('Ens2ACC.p','rb') as f2:
+            Ens2ACC = pickle.load(f2)
+    else:    
+        query = ' '.join(lis)
+        url = 'https://www.uniprot.org/uploadlists/'    
+        params = {
+        'from': 'ACC+ID',
+        'to': 'ENSEMBL_ID',
+        'format': 'tab',
+        'query': query
+        }
         
+        data = urllib.parse.urlencode(params)  # convert dict to string
+        data = data.encode('utf-8')     # convert string to byte
+        req = urllib.request.Request(url, data)
+        with urllib.request.urlopen(req) as f:
+           response = f.read()   
+        a = response.decode('utf-8')        # convert byte to string
+        
+        rows = a.split('\n')
+        rows = rows[1:]   # the first item is 'from':'to'
+        rows = rows[:-1]  # the last item is empty, it is becasue the last '\n' got recognized as newline
+        ACC2Ens,Ens2ACC = {},{}
+        for item in rows:
+            ACC = item.split('\t')[0]
+            Ens = item.split('\t')[1]        
+            ACC2Ens[ACC] = Ens
+            Ens2ACC[Ens] = ACC
+        diff = len(set(lis)) - len(set(list(ACC2Ens.keys())))
+        if mannual == False:
+            print('There are {0} membrane protein missing!!!!'.format(diff))
+        elif mannual == True:
+            print('There are {0} membrane protein needs to be mannually checked, you can exit anytime'.format(diff))            
+            for acc in lis:     # some ACC doesn't map to a EnsGID, double check see if every one in human membrane list has been mapped
+                try: ACC2Ens[acc]
+                except KeyError:
+                    print('Please mannually check if {0} has corresponding EnsGID:'.format(acc))
+                    cond = input('Does {0} have corresponding EnsGID? (y|n|e):'.format(acc))
+                    if cond == 'y':
+                        EnsGID = input('Please enter the corresponding EnsGID:')
+                        ACC2Ens[acc] = EnsGID
+                        Ens2ACC[EnsGID] = acc
+                        print('Great!, {0} has been mannually added to dictionary.'.format(EnsGID))
+                    if cond == 'n':
+                        print('Caveat: {0} is a humen membrane protein, it will not be considered in following analysis'.format(acc))
+                    if cond == 'e':
+                        break
+           
+            with open('Ens2ACC.p','wb') as f1:
+                pickle.dump(Ens2ACC,f1)
+    return Ens2ACC    # as complete as possible
     
 
 if __name__ == "__main__":
     start_time = process_time()
     # get increased part
-    df = pd.read_csv('PSI.RBM47Deletion_vs_noRBM47Deletion.txt',sep='\t')
+    df = pd.read_csv('PSI.R1-V7_vs_Healthy.txt',sep='\t')
     
-    # load the files, return matched result and cognate whole transcript sequence
+    # load the files
     df_ori = GetIncreasedPart(df)
-    df_exonlist = pd.read_csv('mRNA-ExonIDs.txt',sep='\t',
+    df_exonlist = pd.read_csv('./data/mRNA-ExonIDs.txt',sep='\t',
                               header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
-    dict_exonCoords = exonCoords_to_dict('Hs_Ensembl_exon.txt','\t')
-    dict_fa = fasta_to_dict('Hs_gene-seq-2000_flank.fa')
-    col1,col2 = match_with_exonlist(df_ori,df_exonlist,dict_exonCoords)
+    dict_exonCoords = exonCoords_to_dict('./data/Hs_Ensembl_exon.txt','\t')
+    dict_fa = fasta_to_dict('./data/Hs_gene-seq-2000_flank.fa')
+    
+    # overlapping with human membrane proteins
+    df_membraneProteins = pd.read_csv('human_membrane_proteins.txt',sep='\t')  
+    ACClist = df_membraneProteins['Entry'].tolist()
+    Ens2ACC = IDmappingACC2Ensembl(ACClist,True) 
+    EnsID = extract_EnsID(df_ori)
+    df_ori['condition'] = [True if item in list(Ens2ACC.keys()) else False for item in EnsID]
+    df_ori_narrow = df_ori[df_ori['condition'] == True]
+    df_ori_narrow = df_ori_narrow.drop(columns=['condition'])
+
+    # match with all existing transcripts
+    col1,col2 = match_with_exonlist(df_ori_narrow,df_exonlist,dict_exonCoords)
+    
+    df_ori_narrow['exam_match_whole_tran'] = col1
+    df_ori_narrow['back_match_whole_tran'] = col2
     
     # derive the most likely ORF for each whole transcript sequence
-    output_exam = final_conversion(col1)
-    output_back = final_conversion(col2)
-    output_exam_aa,output_exam_tran = output_exam[0],output_exam[1]
-    output_back_aa,output_back_tran = output_back[0],output_back[1]
-
-    df_ori['exam_match_aa'] = output_exam_aa
-    df_ori['back_match_aa'] = output_back_aa
-    df_ori['exam_match_tran'] = output_exam_tran
-    df_ori['back_match_tran'] = output_back_tran
+    output_exam_tran,output_exam_aa = final_conversion(col1)
+    output_back_tran,output_back_aa = final_conversion(col2)    
+    
+    
+    df_ori_narrow['exam_match_tran'] = output_exam_tran
+    df_ori_narrow['exam_match_aa'] = output_exam_aa
+    df_ori_narrow['back_match_tran'] = output_back_tran
+    df_ori_narrow['back_match_aa'] = output_back_aa
     
     # derive the junction site sequence and add two columns to df_ori
-    new_df = retrieve_junction_site(df_ori)
+    new_df_narrow = retrieveJunctionSite(df_ori_narrow,dict_exonCoords,dict_fa)
     
-    # get extracellur, part4
-    EnsID = extract_EnsID(df_ori)
-    write_list_to_file(EnsID)  # write all EnsID to a list then batch query on uniprot to get corresponding uniprot ID
+    df_retained,df_filtered = check_if_good_representative(new_df_narrow)
     
-    
-    
-    # Pause here to get EnsID query list to upload to Uniprot to get query_result
-    '''
-    go to uniprot, retrieve/mapping, upload the file we just got, choose from Ensembl to uniprotKB
-    '''
-    #
-    #########################################################################################
-    ########################################################################################
-    
-    
-    EnsID_to_uniprot = pd.read_csv('query_result.tab',sep='\t',header=None,
-       names=['EnsID','isoforms','uniprot_entry','Entry_name','protein','length','topology','gene_name'], #change the column name if needed
-       skiprows=1)     # load in the query result, EnsID to Uniprot ID 
-    # aboved step could use API, https://www.uniprot.org/help/uploadlists
-    
-    # based on EnsID to Uniprot ID relationship, narrow the df_ori to df_ori_narrow which only has extracellular one
-    uniprot_info = pd.read_csv('uniprot_info.tab',sep='\t')  # load all uniprot human membrane protein info
-    extracellular_gene,dict_EnsID_uni = find_membrane_EnsID(EnsID_to_uniprot,uniprot_info)
-    df_ori['condition'] = [True if item in extracellular_gene else False for item in EnsID]
-    # this could also be achived by apply function or lambda function
-    df_ori_narrow = df_ori[df_ori['condition'] == True]
-    # aboved step could use API, https://www.uniprot.org/help/uploadlists
-    
-   #### get the representative and check if it is a good representative
+    # for retained ones
 
-    representative,whole_tran,position_array = representative_tran_and_whole_tran(df_ori_narrow)
-    df_ori_narrow['representative_tran'] = representative
-    df_ori_narrow['whole_tran'] = whole_tran# don't to_csv then read_csv
-    df_ori_narrow['postion'] = position_array
-    df_ori_narrow_good_repre = check_if_good_representative(df_ori_narrow)
     
     ### final alignment
-    dict_uni_fa = read_uniprot_seq('uniprot_canonical.fasta')
-    comment,alignment,repre_aa = alignment_to_uniprot(df_ori_narrow_good_repre,dict_uni_fa,dict_EnsID_uni)   
-    df_ori_narrow_good_repre['comment'] = comment
-    df_ori_narrow_good_repre['alignment'] = alignment
-    
-               
-    # mannaully check the case
-    df_ori_narrow_good_repre['repre_aa'] = repre_aa  # this operation might catch a caveat, .loc[rowInd,colInd] = value
-    
-    #write them out
-    df_ori_narrow_good_repre.to_csv('final_result.txt',sep='\t',header=True,index=False)      
-    df_ori_narrow.to_csv('extracellur_narrow_down.txt',sep='\t',header=True,index=False)
-   
-    
-    # ENSG00000282228   - strand use case
-    # ENSG00000110514   +
-    # ENSG00000243646
+    dict_uni_fa = read_uniprot_seq('uniprot_isoform.fasta')
+        
+    df_retained_aligned = alignment_to_uniprot(df_retained,dict_uni_fa,Ens2ACC)   
+    df_retained_aligned.to_csv('')
 
-# focus on all novel splicing events
-    novel_splicing = df_ori_narrow[df_ori_narrow['whole_tran']=='']
-    novel_splicing.to_csv('novel_splicing.txt',sep='\t',header=True,index=False)
-    
-    
-# seperate totally aligned, not aligned and partially aligned instances
-    totally = df_ori_narrow_good_repre[df_ori_narrow_good_repre['alignment'] == 'totally aligned']
-    partially = df_ori_narrow_good_repre[df_ori_narrow_good_repre['alignment'] == 'partially aligned'] 
-    not_aligned = df_ori_narrow_good_repre[df_ori_narrow_good_repre['alignment'] == 'not aligned'] 
-    
-    partially.to_csv('partially.txt',sep='\t',header=True,index=False)
-    not_aligned.to_csv('not_aligned.txt',sep='\t',header=True,index=False)
     
     # summarize the distribution of splicing event in df_all and df_increased
     freq_all = ChroDistribution(df)

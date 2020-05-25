@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
+#!/Users/ligk2e/opt/anaconda3/envs/python3/bin/python3
 # -*- coding: utf-8 -*-
 """
 Created on Mon Mar 16 19:43:43 2020
 
 @author: ligk2e
 """
-
+import sys
+sys.path.append('/Users/ligk2e/opt/anaconda3/envs/python3/lib/python3.7/site-packages')
 import os
-os.chdir('/Users/ligk2e/Desktop/project_LUAD')
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
@@ -24,6 +24,10 @@ import urllib.parse
 import urllib.request
 import requests
 import xmltodict
+import subprocess
+import argparse
+import getopt
+
 
 ############################################################################################
 # part1: branch2.py, match to existing peptides
@@ -60,7 +64,7 @@ def UID(df, i):
     # if fusion gene: E22-ENSG:E31
     return dict
 
-def match_with_exonlist(df_ori,df_exonlist,dict_exonCoords):
+def match_with_exonlist(df_ori,df_exonlist,dict_exonCoords,dict_fa):
     col1 = []
     col2 = []
     
@@ -69,8 +73,8 @@ def match_with_exonlist(df_ori,df_exonlist,dict_exonCoords):
         EnsID=list(temp.keys())[0].split(':')[1]
         Exons_examined = exon_extract(temp,0,EnsID)
         Exons_back = exon_extract(temp,1,EnsID)
-        col1.append(core_match(df_exonlist,dict_exonCoords,EnsID,Exons_examined))
-        col2.append(core_match(df_exonlist,dict_exonCoords,EnsID,Exons_back))
+        col1.append(core_match(df_exonlist,dict_exonCoords,EnsID,Exons_examined,dict_fa))
+        col2.append(core_match(df_exonlist,dict_exonCoords,EnsID,Exons_back,dict_fa))
         
     return col1,col2
 
@@ -98,8 +102,8 @@ def exon_extract(temp,pos,EnsID):
     Exons = list(temp.values())[0][pos].split('-')[0] + '|' + list(temp.values())[0][pos].split('-')[1]
     return Exons
 
-def core_match(df_exonlist,dict_exonCoords,EnsID,Exons):
-   
+def core_match(df_exonlist,dict_exonCoords,EnsID,Exons,dict_fa):
+    
     try:
         df_certain = df_exonlist[df_exonlist['EnsGID'] == EnsID]
     except: full_transcript_store = []  # EnsGID is absent in df_exonlist
@@ -486,49 +490,6 @@ def write_list_to_file(list):
         f1.writelines('%s\n' % EnsID_i for EnsID_i in list)
     return None
 
-
-            
-
-def representative_tran_and_whole_tran(df):
-
-    # one on one to find correponding representative and their whole transcript        
-    representative = []
-    whole_tran = []
-    position_array = []
-    for i in range(df.shape[0]):
-        event = list(df['exam_match_tran'])[i]
-        # initiate the condition to find the most likely representative
-        flag = -1
-        max_seq = ''
-        max_length = 0
-        max_item_score = 0
-        position = 0    # how to use flag to record the position info and when to use index/item to loop
-        for tran in event:  
-            flag += 1
-            if not len(tran)==0: 
-                temp1 = len(tran)
-                add_score = score_GC(tran) + score_coding_bias(tran)
-                if (temp1 - max_length) >= 8:
-                    max_length = temp1
-                    max_item_score = add_score
-                    max_seq = tran
-                    position = flag
-                elif (temp1 - max_length) >= 0 and (temp1 - max_length) < 8:
-                    if add_score >= max_item_score:
-                        max_length = temp1
-                        max_item_score = add_score
-                        max_seq = tran
-                        position =flag
-        try:
-            representative.append(max_seq) 
-            whole_tran.append(narrow_whole_tran[i][position])
-            position_array.append(position)
-        except:
-            representative.append('')
-            whole_tran.append('')
-            position_array.append(-1)
-    
-    return representative,whole_tran,position_array
  
 
 
@@ -581,7 +542,7 @@ def check_if_good_representative(df):
      # filter out events that can not match with existing ones, or events that could match but splicing site won't involve in ORF formation
     return df_retained,df_filtered
             
-def alignment_to_uniprot(df,dict_fa,Ens2ACC):
+def alignment_to_uniprot(df,dict_uni_fa,Ens2ACC):
     col1 = []
     col2 = []
     col3 = []
@@ -769,22 +730,34 @@ def IDmappingACC2Ensembl(lis,mannual=False):
             with open('Ens2ACC.p','wb') as f1:
                 pickle.dump(Ens2ACC,f1)
     return Ens2ACC    # as complete as possible
-    
 
-if __name__ == "__main__":
-    start_time = process_time()
+def TMHMM(aa,name,out):
+    # download TMHMM linux version, untar it.
+    # change shabang of tmhmm and tmhmmformat.pl to the path of perl 5+ you loaded
+    # export the path of tmhmm to $PATH, finsh configuration
+    with open('{}.fasta'.format(name),'w') as f1:
+        f1.write('>peptide_{}\n'.format(name))
+        f1.write(aa)
+    with open(out,'w') as f2:
+        subprocess.run(['tmhmm','{}.fasta'.format(name)],stout = f2)
+        
+def main(intFile,dataFolder,outFolder):
+#    intFile = parser.intFile
+#    dataFolder = parser.dataFolder
+#    outFolder = parser.outFolder
+#    print(intFile,dataFolder,outFolder)
     # get increased part
-    df = pd.read_csv('PSI.R1-V7_vs_Healthy.txt',sep='\t')
+    df = pd.read_csv(intFile,sep='\t')
     
     # load the files
     df_ori = GetIncreasedPart(df)
-    df_exonlist = pd.read_csv('./data/mRNA-ExonIDs.txt',sep='\t',
-                              header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
-    dict_exonCoords = exonCoords_to_dict('./data/Hs_Ensembl_exon.txt','\t')
-    dict_fa = fasta_to_dict('./data/Hs_gene-seq-2000_flank.fa')
+    df_exonlist = pd.read_csv(os.path.join(dataFolder,'mRNA-ExonIDs.txt'),sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
+    dict_exonCoords = exonCoords_to_dict(os.path.join(dataFolder,'Hs_Ensembl_exon.txt'),'\t')
+    
+    dict_fa = fasta_to_dict(os.path.join(dataFolder,'Hs_gene-seq-2000_flank.fa'))
     
     # overlapping with human membrane proteins
-    df_membraneProteins = pd.read_csv('human_membrane_proteins.txt',sep='\t')  
+    df_membraneProteins = pd.read_csv(os.path.join(dataFolder,'human_membrane_proteins.txt'),sep='\t')  
     ACClist = df_membraneProteins['Entry'].tolist()
     Ens2ACC = IDmappingACC2Ensembl(ACClist,True) 
     EnsID = extract_EnsID(df_ori)
@@ -793,7 +766,7 @@ if __name__ == "__main__":
     df_ori_narrow = df_ori_narrow.drop(columns=['condition'])
 
     # match with all existing transcripts
-    col1,col2 = match_with_exonlist(df_ori_narrow,df_exonlist,dict_exonCoords)
+    col1,col2 = match_with_exonlist(df_ori_narrow,df_exonlist,dict_exonCoords,dict_fa)
     
     df_ori_narrow['exam_match_whole_tran'] = col1
     df_ori_narrow['back_match_whole_tran'] = col2
@@ -817,47 +790,93 @@ if __name__ == "__main__":
 
     
     ### final alignment
-    dict_uni_fa = read_uniprot_seq('uniprot_isoform.fasta')
+    dict_uni_fa = read_uniprot_seq(os.path.join(dataFolder,'uniprot_isoform.fasta'))
         
     df_retained_aligned = alignment_to_uniprot(df_retained,dict_uni_fa,Ens2ACC)   
-    df_retained_aligned.to_csv('')
+    df_retained_aligned.to_csv(os.path.join(outFolder,'df_retained.txt'),sep='\t',index=None)
+    
+    # for filtered ones
+    df_filtered.to_csv(os.path.join(outFolder,'df_filtered.txt'),sep='\t',index=None)    
+
+def usage():
+    print('Usage:')
+    print('/Users/ligk2e/opt/anaconda3/bin/python3 NeoEpitopePredictor.py --intFile /Users/ligk2e/Desktop/project_breast/R1-V6/PSI.R1-V6.MergedResult.MergedFiles.2_vs_Others.txt --dataFolder /Users/ligk2e/Desktop/project_breast/R1-V6/data --outFile /Users/ligk2e/Desktop/project_breast/R1-V6')
+    print('Options:')
+    print('--intFile : path of input file')
+    print('--dataFolder : path of data folder')
+    print('--outFile : output folder')    
+    
+    
+
+if __name__ == "__main__":
+    os.chdir('/Users/ligk2e/Desktop/project_LUAD')
+    
+    try:
+        options, remainder = getopt.getopt(sys.argv[1:],'h',['help','intFile=','dataFolder=','outFile='])
+    except getopt.GetoptError as err:
+        print('ERROR:', err)
+        usage()
+        sys.exit(1)
+    for opt, arg in options:
+        if opt in ('--intFile'):
+            intFile = arg
+            print('Input file is:', arg)
+        elif opt in ('--dataFolder'):
+            dataFolder = arg
+            print('Data folder is:',arg)
+        elif opt in ('--outFile'):
+            outFolder = arg
+            print('output folder:',arg)
+        elif opt in ('-h','-help'):
+            usage()
+            sys.exit(1)
+    main(intFile,dataFolder,outFolder)
+    
+    
+    
+    
+#    parser = argparse.ArgumentParser(description='Receptor Protein Prediction') # ArgumentParser object
+#    parser.add_argument('--intFile',type=str,default='.',help='input file path')
+#    parser.add_argument('--dataFolder',type=str,default='./data',help='data folder path')
+#    parser.add_argument('--outFolder',type=str,default='.',help='output folder path')
+#    args = parser.parse_args()   # namespace object
+#    main(args)
+
 
     
     # summarize the distribution of splicing event in df_all and df_increased
-    freq_all = ChroDistribution(df)
-    freq_increased = ChroDistribution(df_ori)
+#    freq_all = ChroDistribution(df)
+#    freq_increased = ChroDistribution(df_ori)
 #    print(freq_all,freq_increased)
     
     # continue exploit on chromosomes
-    chro_dict = {
-            'chr1': [1961,248,'Metacentric'],    #[1961genes,248 or so million bp, type of centromere]
-            'chr2': [1194,242,'Submetacentric'],
-            'chr3': [1024,198,'Metacentric'],
-            'chr4': [727,190,'Submetacentric'],
-            'chr5': [839,181,'Submetacentric'],
-            'chr6': [996,170,'Submetacentric'],
-            'chr7': [862,159,'Submetacentric'],
-            'chr8': [646,145,'Submetacentric'],
-            'chr9': [739,138,'Submetacentric'],
-            'chr10': [706,133,'Submetacentric'],
-            'chr11': [1224,135,'Submetacentric'],
-            'chr12': [988,133,'Submetacentric'],
-            'chr13': [308,114,'Acrocentric'],
-            'chr14': [583,107,'Acrocentric'],
-            'chr15': [561,101,'Acrocentric'],
-            'chr16': [795,90,'Metacentric'],
-            'chr17': [1124,83,'Submetacentric'],
-            'chr18': [261,80,'Submetacentric'],
-            'chr19': [1357,58,'Metacentric'],
-            'chr20': [516,64,'Metacentric'],
-            'chr21': [215,46,'Acrocentric'],
-            'chr22': [417,50,'Acrocentric'],
-            'chrX': [804,156,'Submetacentric'],
-            'chrY': [63,57,'Acrocentric']}  
-    PlotChroScarse(chro_dict,'human chromosome genes distribution.pdf')
-    
-    end_time = process_time()
-    print("from {0} to {1},consuming {2} seconds".format(start_time,end_time,end_time - start_time))
+#    chro_dict = {
+#            'chr1': [1961,248,'Metacentric'],    #[1961genes,248 or so million bp, type of centromere]
+#            'chr2': [1194,242,'Submetacentric'],
+#            'chr3': [1024,198,'Metacentric'],
+#            'chr4': [727,190,'Submetacentric'],
+#            'chr5': [839,181,'Submetacentric'],
+#            'chr6': [996,170,'Submetacentric'],
+#            'chr7': [862,159,'Submetacentric'],
+#            'chr8': [646,145,'Submetacentric'],
+#            'chr9': [739,138,'Submetacentric'],
+#            'chr10': [706,133,'Submetacentric'],
+#            'chr11': [1224,135,'Submetacentric'],
+#            'chr12': [988,133,'Submetacentric'],
+#            'chr13': [308,114,'Acrocentric'],
+#            'chr14': [583,107,'Acrocentric'],
+#            'chr15': [561,101,'Acrocentric'],
+#            'chr16': [795,90,'Metacentric'],
+#            'chr17': [1124,83,'Submetacentric'],
+#            'chr18': [261,80,'Submetacentric'],
+#            'chr19': [1357,58,'Metacentric'],
+#            'chr20': [516,64,'Metacentric'],
+#            'chr21': [215,46,'Acrocentric'],
+#            'chr22': [417,50,'Acrocentric'],
+#            'chrX': [804,156,'Submetacentric'],
+#            'chrY': [63,57,'Acrocentric']}  
+#    PlotChroScarse(chro_dict,'human chromosome genes distribution.pdf')
+
     
     
     

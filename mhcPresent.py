@@ -323,8 +323,7 @@ class netMHCpan():
         result = []
         [result.extend(item) for item in lis if isinstance(item,list)]
         result = list(set(result))
-        if not os.path.exists(os.path.join(outFolder,'resultMHC')): os.makedirs(os.path.join(outFolder,'resultMHC'))
-        if not os.path.exists(os.path.join(outFolder,'resultMHC','temp')): os.makedirs(os.path.join(outFolder,'resultMHC','temp'))
+
         with open(os.path.join(outFolder,'resultMHC','temp','query{}.pep'.format(os.getpid())),'w') as f1:
             [f1.write('{}\n'.format(mer)) for mer in result]
         # now we have query.pep file
@@ -465,10 +464,12 @@ def novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,N)
                              front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
                              junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
                 
-                     peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                     merArray = extractNmer(peptide,N) 
-                     merBucket.append(merArray)
-        if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
+                     try:peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                     except: print('**** preexisting bugs')
+                     else:
+                        merArray = extractNmer(peptide,N) 
+                        merBucket.append(merArray)
+        if merBucket == []: merBucket = [[]]  # means no match for the backevent for preexisting bugs
            
     return merBucket
                             
@@ -517,10 +518,12 @@ def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-
                                 front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
                                 junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
                 
-                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                        merArray = extractNmer(peptide,N) 
-                        merBucket.append(merArray)
-        if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
+                        try:peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                        except: print('**** preexistig bugs')
+                        else:
+                            merArray = extractNmer(peptide,N) 
+                            merBucket.append(merArray)
+        if merBucket == []: merBucket = [[]]  # means no match for the former subexon or preexisting bugs
     return merBucket
 
 def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # one stop solution for newSplicingSite type
@@ -570,9 +573,11 @@ def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # o
                                 front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
                                 junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
                 
-                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                        merArray = extractNmer(peptide,N) 
-                        merBucket.append(merArray)
+                        try:peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                        except:print('**** preexising bugs')
+                        else:
+                            merArray = extractNmer(peptide,N) 
+                            merBucket.append(merArray)
         if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
            
     return merBucket
@@ -771,14 +776,14 @@ def neoJunctions_oldMethod_noGTEx(df,colname):
     dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df[colname] <= 0.23))]
     return dfNeoJunction
 
-def neoJunction_oldMethod_checkGTEx(df,colname):
+def neoJunction_oldMethod_checkGTEx(df,colname,dicTissueExp):
     condition = []
     for i in range(df.shape[0]):
         event = df.iloc[i]['UID']
         healthy = df.iloc[i][colname]
         dPSI = df.iloc[i]['dPSI']
         if dPSI >= 0.3 and healthy <= 0.23: 
-            try:inspect = inspectGTEx(event,plot=False)
+            try:inspect = inspectGTEx(event,dicTissueExp,plot=False)
             except KeyError: cond = True    # absent in normal GTEx data set
             else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
         else: cond = False
@@ -787,13 +792,13 @@ def neoJunction_oldMethod_checkGTEx(df,colname):
     df_Neo = df[condition]
     return df_Neo
 
-def neoJunction_newMethod_checkGTEx(df):
+def neoJunction_newMethod_checkGTEx(df,dicTissueExp):
     condition = []
     for i in range(df.shape[0]):
         event = df.iloc[i]['UID']
         per_h = df.iloc[i]['healthy_zero_percent']
         if per_h > 0.95:
-            try:inspect = inspectGTEx(event,plot=False)
+            try:inspect = inspectGTEx(event,dicTissueExp,plot=False)
             except KeyError: cond = True    # absent in normal GTEx data set
             else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
         else: cond = False
@@ -819,12 +824,12 @@ def neoJunction_newMethod_noGTEx(df):
 def neoJunction_testMethod_noGTEx(df):
     return df        
         
-def neoJunction_testMethod_checkGTEx(df):
+def neoJunction_testMethod_checkGTEx(df,dicTissueExp):
     condition = []
     for i in range(df.shape[0]):
         event = df.iloc[i]['UID']
 
-        try:inspect = inspectGTEx(event,plot=False)
+        try:inspect = inspectGTEx(event,dicTissueExp,plot=False)
         except KeyError: cond = True    # absent in normal GTEx data set
         else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
         condition.append(cond)
@@ -1064,9 +1069,11 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
                                     front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
                                     junctionSlice = junction[front:].replace(',','')
                     
-                            peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                            merArray = extractNmer(peptide,N) 
-                            merBucket.append(merArray)
+                            try:peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                            except:print('**** preexising bugs')
+                            else:
+                                merArray = extractNmer(peptide,N) 
+                                merBucket.append(merArray)
         if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
         
     elif event.startswith('I'): merBucket = [[]]
@@ -1082,8 +1089,7 @@ def grabEnsemblTranscriptTable(EnsTID):
     r = requests.get(server+ext, headers={ "Content-Type" : "application/json"})     
     try: decoded = r.json()
     except: 
-        counter += 1
-        print('JSON unknoen error {}'.format(counter))
+        print('JSON unknoen error')
     else:
         try: translationStartIndex = decoded['Translation']['start']
         except KeyError: print('{0} is not translatable'.format(EnsTID)) # might be invalid transcriptID or they don't have tranStartIndex(don't encode protein)
@@ -1096,10 +1102,8 @@ def toFasta(list_,N):
             file1.write('>{0} mer\n'.format(index+1))
             file1.write('{0}\n'.format(item.strip('\'')))
 
-def inspectGTEx(event,tissue='all',plot=True):
+def inspectGTEx(event,dicTissueExp,tissue='all',plot=True):
     flag = 0
-
-    global dicTissueExp
     if tissue=='all':
         tissueExp = dicTissueExp[event]
         for tis,exp in tissueExp.items():
@@ -1112,7 +1116,7 @@ def inspectGTEx(event,tissue='all',plot=True):
                     plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
                     plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
                     plt.legend()
-                    plt.savefig('./figures/{1}.pdf'.format(event,tis),bbox_inches='tight')
+                    plt.savefig(os.path.join(outFolder,'resultMHC','figures/{0}_{1}.pdf'.format(event,tis)),bbox_inches='tight')
                     plt.close(fig)
                 else: continue
             else: 
@@ -1127,7 +1131,7 @@ def inspectGTEx(event,tissue='all',plot=True):
         elif np.any(exp):   # have non-zero element
             plt.bar(np.arange(len(exp)),exp,width=0.2,label='tissue')
             plt.legend()
-            plt.savefig('./{}.pdf'.format(tissue),bbox_inches='tight')
+            plt.savefig(os.path.join(outFolder,'resultMHC','figures/{}.pdf'.format(tissue)),bbox_inches='tight')
             plt.show()
             print(expression)
     return flag  
@@ -1173,6 +1177,9 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     global dict_exonCoords
     global dict_fa
     global dictExonList
+    if not os.path.exists(os.path.join(outFolder,'resultMHC')): os.makedirs(os.path.join(outFolder,'resultMHC'))
+    if not os.path.exists(os.path.join(outFolder,'resultMHC','temp')): os.makedirs(os.path.join(outFolder,'resultMHC','temp'))
+    if not os.path.exists(os.path.join(outFolder,'resultMHC','figures')): os.makedirs(os.path.join(outFolder,'resultMHC','figures'))
     print('loading input files\n')
     df = pd.read_csv(intFile,sep='\t') 
     print('finished loading input files\n')
@@ -1188,7 +1195,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     print('converting subexon coordinates to a dictionary-Process\n')
     dictExonList = convertExonList(df_exonlist)
     print('finished converting subexon coordinates to a dictionary\n')
-    if mode == 'OncoSplice' and checkGTEx==True:
+    if mode == 'OncoSplice' and checkGTEx=='True':
         dfori = pd.read_csv(EventAnnotationFile,sep='\t')
         dfgroup = pd.read_csv(GroupsFile,sep='\t',header=None,names=['TCGA-ID','group','label'])
         print('loading GTEx dataset, it will take 20 mins, please be patient')
@@ -1203,10 +1210,10 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
         metaBaml = Meta(df) #Instantiate Meta object
         metaBaml.getPercent(dfgroup,dfori,'{0}_All'.format(taskName),write=True)
         print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_newMethod_checkGTEx(metaBaml.df)
+        dfNeoJunction = neoJunction_newMethod_checkGTEx(metaBaml.df,dicTissueExp)
         print('NeoJunctions are ready\n')
     
-    if mode == 'OncoSplice' and checkGTEx == False:
+    if mode == 'OncoSplice' and checkGTEx == 'False':
         dfori = pd.read_csv(EventAnnotationFile,sep='\t')
         dfgroup = pd.read_csv(GroupsFile,sep='\t',header=None,names=['TCGA-ID','group','label'])
         metaBaml = Meta(df) #Instantiate Meta object
@@ -1217,7 +1224,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     
     
         
-    if mode == 'TumorAndControl' and checkGTEx == True:
+    if mode == 'TumorAndControl' and checkGTEx == 'True':
         print('loading GTEx dataset, it will take 20 mins, please be patient')
         start = process_time()
         with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
@@ -1226,16 +1233,18 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
         print('consume {0}'.format(end-start))
         metaBaml = Meta(df) #Instantiate Meta object
         print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_oldMethod_checkGTEx(metaBaml.df)
+        dfNeoJunction = neoJunction_oldMethod_checkGTEx(metaBaml.df,colname,dicTissueExp)
+        dfNeoJunction.to_csv(os.path.join(outFolder,'{0}_neojunction_TumorAndControl_check.txt'.format(taskName)),sep='\t',index=None)
         print('NeoJunctions are ready\n')
         
-    if mode=='TumorAndControl' and checkGTEx == False:
+    if mode=='TumorAndControl' and checkGTEx == 'False':
         metaBaml = Meta(df) #Instantiate Meta object
         print('generate NeoJunctions\n')
         dfNeoJunction = neoJunction_oldMethod_noGTEx(metaBaml.df)
+        dfNeoJunction.to_csv(os.path.join(outFolder,'{0}_neojunction_TumorAndControl.txt'.format(taskName)),sep='\t',index=None)
         print('NeoJunctions are ready\n')
         
-    if mode == 'singleSample' and checkGTEx == True:
+    if mode == 'singleSample' and checkGTEx == 'True':
         print('loading GTEx dataset, it will take 20 mins, please be patient')
         start = process_time()
         with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
@@ -1244,10 +1253,11 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
         print('consume {0}'.format(end-start))
         metaBaml = Meta(df) #Instantiate Meta object
         print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_testMethod_checkGTEx(metaBaml.df)
+        dfNeoJunction = neoJunction_testMethod_checkGTEx(metaBaml.df,dicTissueExp)
+        dfNeoJunction.to_csv(os.path.join(outFolder,'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t',index=None)
         print('NeoJunctions are ready\n')
         
-    if mode == 'singleSample' and checkGTEx == False:
+    if mode == 'singleSample' and checkGTEx == 'False':
         metaBaml = Meta(df) #Instantiate Meta object
         print('generate NeoJunctions\n')
         dfNeoJunction = neoJunction_testMethod_noGTEx(metaBaml.df)
@@ -1267,7 +1277,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     pool.join()
     Crystal = pd.concat(df_out_list)   # default is stacking by rows
     
-    Crystal.to_csv('./resultMHC/NeoJunction_{0}_mark.txt'.format(k),sep='\t',header=True,index = False)
+    Crystal.to_csv(os.path.join(outFolder,'resultMHC/NeoJunction_{0}_mark.txt'.format(k)),sep='\t',header=True,index = False)
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))
@@ -1312,37 +1322,37 @@ if __name__ == "__main__":
         sys.exit(1)
     for opt, arg in options:
         if opt in ('-i'):
-            intFile = arg
+            intFile = str(arg)
             print('Input file is:', arg)
         elif opt in ('-t'):
-            taskName = arg
+            taskName = str(arg)
             print('give your task a name:',arg)
         elif opt in ('-o'):
-            outFolder = arg
+            outFolder = str(arg)
             print('output folder:',arg)
         elif opt in ('-d'):
-            dataFolder = arg
+            dataFolder = str(arg)
             print('data folder:',arg)
         elif opt in ('-k'):
             k= int(arg)
             print('kmer:', arg)
         elif opt in ('-H'):
-            HLA = arg
+            HLA = str(arg)
             print('Queried HLA allele:',arg)
         elif opt in ('-s'):
-            software = arg
+            software = str(arg)
             print('Full path of netMHCpan standalone version:',arg)
         elif opt in ('-M'):
-            MHCmode = arg
+            MHCmode = str(arg)
             print('MHCI or MHCII:',arg)
         elif opt in ('-m'):
-            mode = arg
+            mode = str(arg)
             print('How to get Neo-Junction:',arg)
         elif opt in ('-C'):
             Core = int(arg)
             print('How many processes to use:',arg)
         elif opt in ('-c'):
-            checkGTEx = bool(arg)
+            checkGTEx = arg
             print('check GTEx or not:',arg)
         elif opt in ('--EventAnnotationFile'):
             EventAnnotationFile = arg
@@ -1354,9 +1364,9 @@ if __name__ == "__main__":
             usage() 
             sys.exit() 
 
-    counter = 0
-    main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkGTEx=False,EventAnnotationFile='dummy.txt',GroupsFile='proxy.txt')
-    print(counter)
+
+    main(intFile,taskName,k,HLA,software,MHCmode,mode,Core,checkGTEx,EventAnnotationFile='dummy.txt',GroupsFile='proxy.txt')
+
     
     
     

@@ -6,7 +6,7 @@ Created on Mon Mar 16 19:43:43 2020
 @author: ligk2e
 """
 import sys
-sys.path.append('/Users/ligk2e/opt/anaconda3/envs/python3/lib/python3.7/site-packages')
+#sys.path.append('/Users/ligk2e/opt/anaconda3/envs/python3/lib/python3.7/site-packages')
 import os
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from Bio.Seq import Seq
@@ -27,6 +27,7 @@ import xmltodict
 import subprocess
 import argparse
 import getopt
+import ast
 
 
 ############################################################################################
@@ -542,7 +543,7 @@ def check_if_good_representative(df):
      # filter out events that can not match with existing ones, or events that could match but splicing site won't involve in ORF formation
     return df_retained,df_filtered
             
-def alignment_to_uniprot(df,dict_uni_fa,Ens2ACC):
+def alignment_to_uniprot(df,dict_uni_fa,Ens2ACC,mode):
     col1 = []
     col2 = []
     col3 = []
@@ -578,7 +579,7 @@ def alignment_to_uniprot(df,dict_uni_fa,Ens2ACC):
                     else: subnotes[k].append('partiallyAligned')
                 repre.append(subnotes)
             elif involve[idx] == False:
-                repre.append('Either splicing site is not involved in ORF formation or splicing event is novel event')
+                repre.append('Either splicing site is not involved in ORF formation or splicing event doesn\'t occur in this certain transcript')
         col1.append(repre)
         # define what kind of peptide this splicing sites would generate by interogratting each repre list
         identity = []
@@ -590,18 +591,49 @@ def alignment_to_uniprot(df,dict_uni_fa,Ens2ACC):
                         definition = 'one of already documented isoforms'
                         break
             else: 
-                definition = 'Either splicing site is not involved in ORF formation or splicing event is novel event'
+                definition = 'Either splicing site is not involved in ORF formation or splicing event doesn\'t occur in this certain transcript'
             if definition == '': definition = 'novel isoform'
             identity.append(definition)
         col2.append(identity)
         # let's see if it is possible to generate any novel isoform
-        crystal = False
-        for idx,w in enumerate(identity):
-            if w == 'novel isoform': 
-                crystal = True  # we need look into that
-                col3.append(crystal)
-                break
-        if crystal == False: col3.append(crystal) # no need to look into this event anymore
+
+
+        if mode=='strigent':   # as long as one of possible concatenation results in totallyAligned, then we stop pursuing
+
+            for idx,w in enumerate(identity):
+                crystal = True   
+                if w == 'one of already documented isoforms': 
+                    crystal = False
+                    break
+            if crystal == True:
+                crystal_ = []
+                for idx,w in enumerate(identity):
+                    if w == 'novel isoform': 
+                        query_aa = match_aa[idx]
+                        try: result = TMHMM(query_aa,'{0}_{1}_{2}'.format(i,idx,EnsID))  # there's some rare case, it can match up with exising one,
+                        # but it doesn't have reasonable ORFs, so the returned ORF prediction is ''
+                        except: result = False
+                        if result:
+                            crys = (True,idx)  # we need look into that
+                            crystal_.append(crys)
+                if crystal_ == []: col3.append(False) # no need to look into this event anymore
+                else: col3.append(crystal_)
+            else:
+                col3.append(False)
+            
+        elif mode=='loose':    # consider every possible novel isoform possibilities
+            crystal = []
+            for idx,w in enumerate(identity):
+                if w == 'novel isoform': 
+                    query_aa = match_aa[idx]
+                    try: result = TMHMM(query_aa,'{0}_{1}_{2}'.format(i,idx,EnsID))  # there's some rare case, it can match up with exising one,
+                    # but it doesn't have reasonable ORFs, so the returned ORF prediction is ''
+                    except: result = False
+                    if result:
+                        crys = (True,idx)  # we need look into that
+                        crystal.append(crys)
+            if crystal == []: col3.append(False) # no need to look into this event anymore
+            else: col3.append(crystal)
             
         
     df['alignment'] = col1
@@ -678,8 +710,8 @@ def PlotChroScarse(chro_dict,path):
     plt.close(fig)
     
 def IDmappingACC2Ensembl(lis,mannual=False):  
-    if os.path.exists('Ens2ACC.p'): 
-        with open('Ens2ACC.p','rb') as f2:
+    if os.path.exists(os.path.join(outFolder,'Ens2ACC.p')): 
+        with open(os.path.join(outFolder,'Ens2ACC.p'),'rb') as f2:
             Ens2ACC = pickle.load(f2)
     else:    
         query = ' '.join(lis)
@@ -727,21 +759,55 @@ def IDmappingACC2Ensembl(lis,mannual=False):
                     if cond == 'e':
                         break
            
-            with open('Ens2ACC.p','wb') as f1:
+            with open(os.path.join(outFolder,'Ens2ACC.p'),'wb') as f1:
                 pickle.dump(Ens2ACC,f1)
     return Ens2ACC    # as complete as possible
 
-def TMHMM(aa,name,out):
+def TMHMM(aa,name):
     # download TMHMM linux version, untar it.
     # change shabang of tmhmm and tmhmmformat.pl to the path of perl 5+ you loaded
     # export the path of tmhmm to $PATH, finsh configuration
-    with open('{}.fasta'.format(name),'w') as f1:
+
+    # in my use case, save those for convenience
+    # perl: /usr/local/perl/5.20.1/bin/perl
+    # tmhmm: /data/salomonis2/LabFiles/Frank-Li/python3/TMHMM/tmhmm-2.0c/bin
+    if not os.path.exists(os.path.join(outFolder,'TMHMM_temp')): os.makedirs(os.path.join(outFolder,'TMHMM_temp'))
+    with open(os.path.join(outFolder,'TMHMM_temp','{}.fasta'.format(name)),'w') as f1:
         f1.write('>peptide_{}\n'.format(name))
         f1.write(aa)
-    with open(out,'w') as f2:
-        subprocess.run(['tmhmm','{}.fasta'.format(name)],stout = f2)
+    with open(os.path.join(outFolder,'TMHMM_temp','{}.out'.format(name)),'w') as f2:
+        subprocess.run(['tmhmm',os.path.join(outFolder,'TMHMM_temp','{}.fasta'.format(name))],stdout = f2)
+    with open(os.path.join(outFolder,'TMHMM_temp','{}.out'.format(name)),'r') as f3:
+        next(f3)
+        punchline = f3.readline().rstrip('\n').split(' ')
+        TMn = int(punchline[-1])
+    result = True if TMn > 0 else False
+    return result
+
+def diffNovelFromNotInvolved(df):
+    col = []
+
+    for i in range(df.shape[0]):
+        cond = True
+        exam_match_whole_tran = df['exam_match_whole_tran'].iloc[i]   # will be a list already, 1*1
+        for item in exam_match_whole_tran:
+            if item: 
+                cond = False
+                break
+        col.append(cond)
+    df['cond'] = col
+    try:df_novel = df[df['cond']]
+    except:
+        print(len(col),df.shape[0],col)
+        df.to_csv(os.path.join(outFolder,'fjdfjd.txt'),sep='\t',index=None)
+        raise Exception('jkjk')
+    return df_novel
+
+
+
+
         
-def main(intFile,dataFolder,outFolder):
+def main(intFile,dataFolder,outFolder,mode):
 #    intFile = parser.intFile
 #    dataFolder = parser.dataFolder
 #    outFolder = parser.outFolder
@@ -792,27 +858,29 @@ def main(intFile,dataFolder,outFolder):
     ### final alignment
     dict_uni_fa = read_uniprot_seq(os.path.join(dataFolder,'uniprot_isoform.fasta'))
         
-    df_retained_aligned = alignment_to_uniprot(df_retained,dict_uni_fa,Ens2ACC)   
+    df_retained_aligned = alignment_to_uniprot(df_retained,dict_uni_fa,Ens2ACC,mode)   
     df_retained_aligned.to_csv(os.path.join(outFolder,'df_retained.txt'),sep='\t',index=None)
     
     # for filtered ones
-    df_filtered.to_csv(os.path.join(outFolder,'df_filtered.txt'),sep='\t',index=None)    
+    df_novel = diffNovelFromNotInvolved(df_filtered)
+    df_novel.to_csv(os.path.join(outFolder,'df_novel.txt'),sep='\t',index=None)    
 
 def usage():
     print('Usage:')
-    print('/Users/ligk2e/opt/anaconda3/bin/python3 NeoEpitopePredictor.py --intFile /Users/ligk2e/Desktop/project_breast/R1-V6/PSI.R1-V6.MergedResult.MergedFiles.2_vs_Others.txt --dataFolder /Users/ligk2e/Desktop/project_breast/R1-V6/data --outFile /Users/ligk2e/Desktop/project_breast/R1-V6')
+    print('python3 NeoEpitopePredictor.py --intFile /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/receptor/pseudoPSImatrix_percentage.txt --dataFolder /data/salomonis2/LabFiles/Frank-Li/python3/data --outFolder /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/receptor --mode strigent')
     print('Options:')
     print('--intFile : path of input file')
     print('--dataFolder : path of data folder')
-    print('--outFile : output folder')    
+    print('--outFolder : output folder')    
+    print('--mode : using TMHMM or not')
     
     
 
 if __name__ == "__main__":
-    os.chdir('/Users/ligk2e/Desktop/project_LUAD')
+    #os.chdir('/Users/ligk2e/Desktop/project_LUAD')
     
     try:
-        options, remainder = getopt.getopt(sys.argv[1:],'h',['help','intFile=','dataFolder=','outFile='])
+        options, remainder = getopt.getopt(sys.argv[1:],'h',['help','intFile=','dataFolder=','outFolder=','mode='])
     except getopt.GetoptError as err:
         print('ERROR:', err)
         usage()
@@ -824,13 +892,18 @@ if __name__ == "__main__":
         elif opt in ('--dataFolder'):
             dataFolder = arg
             print('Data folder is:',arg)
-        elif opt in ('--outFile'):
+        elif opt in ('--outFolder'):
             outFolder = arg
             print('output folder:',arg)
-        elif opt in ('-h','-help'):
+        elif opt in ('--mode'):
+            mode = arg
+
+            print('Using TMHMM?:',arg)
+        elif opt in ('-h','--help'):
             usage()
             sys.exit(1)
-    main(intFile,dataFolder,outFolder)
+
+    main(intFile,dataFolder,outFolder,mode)
     
     
     

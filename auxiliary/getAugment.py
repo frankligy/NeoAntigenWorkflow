@@ -1,3 +1,5 @@
+import os
+os.chdir('/Users/ligk2e/Desktop/project_test/resultMHC')
 import pandas as pd
 import ast
 import pickle
@@ -16,7 +18,7 @@ def getb(list_):
         if item == 'No candidates': continue
         else: 
             info = ast.literal_eval(item)
-            pep = info['HLA-A29:02']
+            pep = info['HLA-B51:01']
             pep_sb,pep_wb = pep[0],pep[1]
             sb.extend(pep_sb)
             wb.extend(pep_wb)
@@ -33,9 +35,9 @@ type(btotal)
 
 # write to fasta
 def toFasta(list_):
-    with open('augment.fasta','w') as file1:
+    with open('augment_b5101.fasta','w') as file1:
         for index,item in enumerate(list_):
             file1.write('>mer{0}\n'.format(index+1))
             file1.write('{0}\n'.format(item))
             
-toFasta(b)
+toFasta(btotal)

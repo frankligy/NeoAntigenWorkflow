@@ -5,6 +5,7 @@ pathos
 numpy
 pandas
 matplotlib
+regex
 
 
 

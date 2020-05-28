@@ -11,13 +11,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
-def scratchPlusView1():
+def scratchPlusView1():     # directly use pool for multiprocessing
 
+    global dicSRA
 
-    sraTable1 = pd.read_csv('./SraRunTable-GTEX1.txt',sep=',')
-    sraTable2 = pd.read_csv('./SraRunTable-GTEX2.txt',sep=',')
-    sraTable3 = pd.read_csv('./SraRunTable-GTEX3.txt',sep=',')
-    sraData = pd.read_csv('./GTEx_EventAnnotation.txt',sep='\t')
+    sraTable1 = pd.read_csv('./data/SraRunTable-GTEX1.txt',sep=',')
+    sraTable2 = pd.read_csv('./data/SraRunTable-GTEX2.txt',sep=',')
+    sraTable3 = pd.read_csv('./data/SraRunTable-GTEX3.txt',sep=',')
+    sraData = pd.read_csv('./data/GTEx_EventAnnotation.txt',sep='\t')
     
     dicSRA = {}
     for i in range(sraTable1.shape[0]):
@@ -57,24 +58,18 @@ def scratchPlusView1():
                 part_df = self.good.iloc[part_index]
                 
                 self.queue.append(part_df)
+
+        def split_ndarray(self,n):
+            dim = len(self.good)
+            lis = [i for i in range(dim)]
+            size = len(lis)//n + 1
+            for j in range(0,len(lis),size):
+                part_ndarray = self.good[j:j+size]
+                self.queue.append(part_ndarray)
         
     Spliter1 = Spliter(sraData) 
     Spliter1.split_df(20)  
     liaisonData = Spliter1.queue 
-    
-    def constructDic(sraData):
-    
-        dicTissueExp = {}
-        for i in range(sraData.shape[0]):
-            print('this is the {0}th run of process{1}'.format(i,os.getpid()))
-            event = sraData['UID'].tolist()[i]
-            for tissue,accID in dicSRA.items():
-                try: dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
-                except KeyError:            
-                    dicTissueExp[event] = {}
-                    dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
-        return dicTissueExp
-    
     
     
     import multiprocessing as mp
@@ -90,6 +85,19 @@ def scratchPlusView1():
     
     dicTissueExp = merge_dicts(dicts)
     return dicTissueExp
+
+def constructDic(sraData):
+
+    dicTissueExp = {}
+    for i in range(sraData.shape[0]):
+        print('this is the {0}th run of process{1}'.format(i,os.getpid()))
+        event = sraData['UID'].tolist()[i]
+        for tissue,accID in dicSRA.items():
+            try: dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
+            except KeyError:            
+                dicTissueExp[event] = {}
+                dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
+    return dicTissueExp
     
 
 
@@ -97,7 +105,7 @@ def scratchPlusView1():
 
 
 
-def scratchPlusView2():
+def scratchPlusView2():     # use manager.queue for shared memory
     sraTable1 = pd.read_csv('./data/SraRunTable-GTEX1.txt',sep=',')
     sraTable2 = pd.read_csv('./data/SraRunTable-GTEX2.txt',sep=',')
     sraTable3 = pd.read_csv('./data/SraRunTable-GTEX3.txt',sep=',')
@@ -211,7 +219,7 @@ def loadPlusView():
     import bz2
     import _pickle as cpickle
     import pickle
-    with bz2.BZ2File('dicTissueExp2.pbz2','rb') as f1:
+    with bz2.BZ2File('./data/dicTissueExp2.pbz2','rb') as f1:
          dicTissueExp = cpickle.load(f1)  
     end = process_time()
     
@@ -225,38 +233,48 @@ def inspectGTEx(dicTissueExp,event,tissue='all',plot=True):
     warnings.filterwarnings("ignore")
 
     if tissue=='all':
-        tissueExp = dicTissueExp[event]
-        for tis,exp in tissueExp.items():
-            exp = exp.astype('float64')
-            exp=exp[np.logical_not(np.isnan(exp))]
-            if exp.size == 0: print('{0} data incomplete'.format(tis))
-            elif np.any(exp):   # have non-zero element
-                if plot==True:
-                    fig = plt.figure()
-                    plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
-                    plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
-                    plt.legend()
-                    if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
-                    plt.savefig('./GTEx/{1}.pdf'.format(event,tis),bbox_inches='tight')
-                    plt.close(fig)
-                else: continue
-            else: 
-                flag += 1
-                print('No expression in {}'.format(tis))
+        try:
+            tissueExp = dicTissueExp[event]
+        except KeyError:
+            print('Don\'t detect expression of {0} in normal tissue'.format(event))
+        else:
+
+            for tis,exp in tissueExp.items():
+                exp = exp.astype('float64')
+                exp=exp[np.logical_not(np.isnan(exp))]
+                if exp.size == 0: print('{0} data incomplete'.format(tis))
+                elif np.any(exp):   # have non-zero element
+                    if plot==True:
+                        fig = plt.figure()
+                        plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
+                        plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
+                        plt.legend()
+                        if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
+                        plt.savefig('./GTEx/{1}.pdf'.format(event,tis),bbox_inches='tight')
+                        plt.close(fig)
+                    else: continue
+                else: 
+                    flag += 1
+                    print('No expression in {}'.format(tis))
+            print('{0} has no expression in {1} tissue types'.format(event,flag))
             
     else:
-        expression = dicTissueExp[event][tissue]
-        exp = expression.astype('float64')
-        exp=exp[np.logical_not(np.isnan(exp))]
-        if exp.size == 0: print('{0} data incomplete'.format(tissue))
-        elif np.any(exp):   # have non-zero element
-            plt.bar(np.arange(len(exp)),exp,width=0.2,label='tissue')
-            plt.legend()
-            if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
-            plt.savefig('./{}.pdf'.format(tissue),bbox_inches='tight')
-            plt.show()
-            print(expression)
-    return flag  
+        try:
+            expression = dicTissueExp[event][tissue]
+        except KeyError:
+            print('Don\'t detect expression of {0} in normal tissue'.format(event))
+        else:
+            exp = expression.astype('float64')
+            exp=exp[np.logical_not(np.isnan(exp))]
+            if exp.size == 0: print('{0} data incomplete'.format(tissue))
+            elif np.any(exp):   # have non-zero element
+                plt.bar(np.arange(len(exp)),exp,width=0.2,label='tissue')
+                plt.legend()
+                if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
+                plt.savefig('./{}.pdf'.format(tissue),bbox_inches='tight')
+                plt.show()
+                print(expression)
+  
 
 def usage():
 
@@ -314,7 +332,7 @@ if __name__ == '__main__':
             usage() 
             sys.exit() 
     full = event + '|' + back        
-    flag = main(full,mode,tissue,plot)
+    main(full,mode,tissue,plot)
     
     
 

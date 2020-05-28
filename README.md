@@ -9,6 +9,7 @@
 * numpy
 * pandas
 * matplotlib
+* regex
 ```
 pip install -r prerequsite.txt
 ```
@@ -18,10 +19,7 @@ Normal usage:
 ```
 python3 mhcPresent.py --help
 ```
-If you are running on cchmc cluster:
-```
-bsub < sub_py.bat
-```
+
 ### Module2: GTEx viewer
 ```
 python3 queryGTEx.py --help

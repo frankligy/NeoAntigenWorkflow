@@ -200,9 +200,7 @@ new = pd.concat([new8_df,new9_df,new10_df,new11_df])
 
 new.to_csv('/Users/ligk2e/Desktop/new.txt',sep='\t',index=None)
 
-'''
-chunk3: get percentage information for each event (Among healthy and tumor samples, how many of them are non-zero)
-'''
+
     
     
     

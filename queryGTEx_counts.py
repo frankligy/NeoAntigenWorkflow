@@ -131,11 +131,7 @@ def constructDic(sraData):
 def loadPlusView():
     from time import process_time
     start = process_time()
-    import bz2
-    import _pickle as cpickle
-    import pickle
-    with bz2.BZ2File('./data/dicTissueExp_c.pbz2','rb') as f1:
-         dicTissueExp = cpickle.load(f1)  
+    dicTissueExp = hkl.load('dicTissueExp_c_gzip.hkl')
     end = process_time()
     
     print('consume {0}'.format(end-start))

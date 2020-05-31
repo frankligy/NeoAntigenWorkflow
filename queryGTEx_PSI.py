@@ -156,7 +156,7 @@ def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
                         plt.ylabel('PSI value')
                         plt.legend()
                         if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
-                        plt.savefig('./GTEx/{1}.svg'.format(event,tis),bbox_inches='tight')
+                        plt.savefig('./GTEx/{0}.svg'.format(tis),bbox_inches='tight')
                         plt.close(fig)
                     else: continue
                 else: 

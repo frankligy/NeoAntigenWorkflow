@@ -129,7 +129,7 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
         for index,value in enumerate(['exam_whole_transcripts','back_whole_transcripts']): 
             col = eval('col'+str(index))
             for transcripts in list(self.df[value]):
-                if transcripts==[]: col.append([])  # I don't think this edge condition will ever be met
+                if not transcripts: col.append(None)  # None's type is Nonetype
                 tempArray = []
                 for transcript in transcripts:
                     if not transcript: tempArray.append('')
@@ -145,7 +145,7 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
         for index,value in enumerate(['exam_ORF_tran','back_ORF_tran']):
             col = eval('col'+str(index))
             for transcripts in list(self.df[value]):
-                if transcripts==[]: col.append([])    # I don't think this edge condition will ever be met
+                if not transcripts: col.append(None)
                 tempArray = []
                 for transcript in transcripts:
                     if not transcript: tempArray.append('')
@@ -729,11 +729,7 @@ def core_match(df_exonlist,dict_exonCoords,EnsID,Exons):
     full_transcript_store = []
     for item in list(df_certain['Exons']):
         full_transcript=''
-        Exons1 = '|' + Exons
-        Exons2 = Exons + '|'
-        
-        if re.search(rf'{re.escape(Exons1)}',item) or re.search(rf'{re.escape(Exons2)}',item) or re.search(rf'{re.escape(Exons)}$',item):
-
+        if Exons in item:
             Exonlist = item.split('|')
             for j in range(len(Exonlist)):
                 coords = dict_exonCoords[EnsID][Exonlist[j]]

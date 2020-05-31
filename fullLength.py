@@ -85,6 +85,17 @@ def convertExonList(df):
     return dictExonList
 
 
+def convertExonList_pep(df):
+    dictExonList = {}
+    for i in range(df.shape[0]):
+        EnsGID = df.iat[i,0]
+        EnsPID = df.iat[i,2]
+        exonList = df.iat[i,3]
+        try: dictExonList[EnsGID][EnsPID] = exonList
+        except KeyError: dictExonList[EnsGID] = {EnsPID:exonList}
+        # {EnsGID:{EnsPID:exonList,EnsPID:exonList}}
+    return dictExonList
+
 
 def uid(df, i):
     uid = list(df['UID'])[i]       
@@ -426,15 +437,27 @@ def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonLis
                     full_left = full_left.replace('\n','')
                 else:
                     full_left = ''
-                    
-                coords_query = dict_exonCoords[EnsID][exam1]  
-                start = int(coords_query[2])
+                
+                
+                
+                coords_query = dict_exonCoords[EnsID][exam1] 
                 strand_query = coords_query[1]
+                start = int(coords_query[2])
+                judge_query = dict_judge[exam1]
+                
+                
                 if strand_query == '+':
+    
                     query_frag = query_from_dict_fa(dict_fa,start,int(exam1_coord),EnsID,strand_query)
+                    
                 elif strand_query == '-':
+                    if not judge_query: start = int(coords_query[2])+1
                     query_frag = query_from_dict_fa(dict_fa,start,int(exam1_coord),EnsID,strand_query)
+                
+
                 query_frag = query_frag.replace('\n','')
+                
+                
                 
                 if bucket_right:
                     full_right = ''
@@ -495,12 +518,17 @@ def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonLis
                 #print(coords_query)
                 strand_query = coords_query[1]
                 judge_query = dict_judge[exam2]
-                if judge_query == True: end = int(coords_query[3])
-                else: end = int(coords_query[3]) - 1
+                end = int(coords_query[3])
+                
+                
                 if strand_query == '+':
+                    if not judge_query: end = int(coords_query[3])-1
                     query_frag = query_from_dict_fa(dict_fa,int(exam2_coord),end,EnsID,strand_query)
+                    
                 elif strand_query == '-':
                     query_frag = query_from_dict_fa(dict_fa,int(exam2_coord),end,EnsID,strand_query)
+                
+
                 query_frag = query_frag.replace('\n','')
                 
                 if bucket_right:
@@ -559,22 +587,37 @@ def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonLis
                 coords_query1 = dict_exonCoords[EnsID][exam1]  
                 start1 = int(coords_query1[2])
                 strand_query1 = coords_query1[1]
+                judge_query1 = dict_judge[exam1]
                 if strand_query1 == '+':
                     query_frag1 = query_from_dict_fa(dict_fa,start1,int(exam1_coord),EnsID,strand_query)
                 elif strand_query1 == '-':
+                    if not judge_query1: start1 = int(coords_query1[2]) + 1
                     query_frag1 = query_from_dict_fa(dict_fa,start1,int(exam1_coord),EnsID,strand_query)
                 query_frag1 = query_frag1.replace('\n','')
                     
                 coords_query2 = dict_exonCoords[EnsID][exam2] 
                 strand_query2 = coords_query[1]
                 judge_query2 = dict_judge[exam2]
-                if judge_query2 == True: end = int(coords_query2[3])
-                else: end2 = int(coords_query2[3]) - 1
+                end2 = int(coords_query2[3])
+                
                 if strand_query2 == '+':
+                    if not judge_query2: end2 = int(coords_query2[3])-1
                     query_frag2 = query_from_dict_fa(dict_fa,int(exam2_coord),end2,EnsID,strand_query)
                 elif strand_query == '-':
                     query_frag2 = query_from_dict_fa(dict_fa,int(exam2_coord),end2,EnsID,strand_query)
+                    
                 query_frag2 = query_frag2.replace('\n','')
+                
+                '''
+                Remember: the arguments to query_from_dict_fa is very simple, it is just the coord[2] and coord[3],
+                no matter which strand it is on. The positive position of the start and end of a segment.
+                
+                if judge is false:
+                    1. '+': coords[3] - 1 
+                    2. '-': coords[2] + 1
+                
+                
+                '''
                 
                 if bucket_right:
                     full_right = ''
@@ -647,7 +690,7 @@ def ORF_check(df):
         print('The {}th run'.format(i))
         temp=uid(df,i) 
         EnsGID = list(temp.keys())[0].split(':')[1]
-        space = dictExonList[EnsGID]  # {'ENST':exonlists,'ENST':exonlists...}
+        space = dictExonList_p[EnsGID]  # {'ENSP':exonlists,'ENSP':exonlists...}
         ORF = df.iloc[i]['ORF']
         first = df.iloc[i]['exam_first_whole_transcripts']
         second = df.iloc[i]['second_round']
@@ -670,16 +713,18 @@ def ORF_check(df):
                     translate.append('')
                 elif orf:
                     whole_ = whole[j]
-                    space_ENST = list(space.keys())[j]
+                    space_ENSP = list(space.keys())[j]
                     space_exons = list(space.values())[j]
                     
-                    result = grabEnsemblTranscriptTable(space_ENST)
+                    #result = grabEnsemblTranscriptTable(space_ENST)
+                    result = check_translation(EnsGID,space_ENSP)
+
                     translate.append(result)
                     
                     series = build_sorted_exons(EnsGID,space_exons)
                     num_exon = len(series) - 1
                     #print(series,num_exon)
-                    
+                    #print(orf,type(orf))
                     orf_end_pos = whole_.find(orf)+len(orf)-1
                     residing = bisect.bisect_left(series,orf_end_pos)   # which exon it resides on
                     #print(residing)
@@ -692,8 +737,12 @@ def ORF_check(df):
                     NMD.append('')
                     translate.append('')
                 elif orf : 
-                    NMD.append('#')    # currently don't support interrogation of NMD for tran-splicing event
-                    translate.append('#')   
+                    if orf=='None': 
+                        NMD.append('None')
+                        translate.append('None')
+                    else:
+                        NMD.append('#')    # currently don't support interrogation of NMD for tran-splicing event
+                        translate.append('#')   
         
         col1.append(NMD)
         col2.append(translate)
@@ -701,6 +750,23 @@ def ORF_check(df):
     df['translate_check'] = col2
     return df
     
+
+
+def check_translation(EnsGID,EnsPID):
+    if EnsPID == 'None':    # usually from RefSeq dataset
+        result = '*'
+    elif 'PEP' in EnsPID:   # ENSP854949-PEP
+        result = '*'
+    else:   # protein coding gene or NMD
+        pepAnno = dict_biotype[EnsGID]  #{ENSP:anno,ENSP:anno}
+        if pepAnno[EnsPID] == 'protein_coding': result = '#'
+        else: result = '*'
+    return result
+    
+        
+
+
+
 
 
 
@@ -945,7 +1011,20 @@ def getORFaa(df):
             col.append(tempArray)
     df['ORFaa'] = col
     return df
-                
+
+def biotype(df):
+    dic = {}
+    for i in range(df.shape[0]):
+        EnsGID = df.iat[i,0]
+        EnsPID = df.iat[i,1]
+        Anno = df.iat[i,2]
+        try:
+            dic[EnsGID][EnsPID] = Anno
+        except KeyError:
+            dic[EnsGID] = {EnsPID:Anno}
+    return dic
+    # {EnsGID:{EnsPID:Anno,EnsPID:Anno}}
+
                             
     
 def main(args):
@@ -960,11 +1039,17 @@ def main(args):
     global dict_exonCoords
     global dict_fa
     global dictExonList
+    global dictExonList_p
+    global df_biotype
+    global dict_biotype
     print('loading data...')
     df_exonlist = pd.read_csv(os.path.join(dataFolder,'mRNA-ExonIDs.txt'),sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
     dict_exonCoords = exonCoords_to_dict(os.path.join(dataFolder,'Hs_Ensembl_exon.txt'),'\t') 
     dict_fa = fasta_to_dict(os.path.join(dataFolder,'Hs_gene-seq-2000_flank.fa'))
     dictExonList = convertExonList(df_exonlist)
+    dictExonList_p = convertExonList_pep(df_exonlist)
+    df_biotype = pd.read_csv(os.path.join(dataFolder,'Hs_Ensembl_transcript-biotypes.txt'),sep='\t')
+    dict_biotype = biotype(df_biotype)
     print('loding input file...')
     df = pd.read_csv(intFile,sep='\t')  # only one column name is 'UID'
     print('first round matching...')

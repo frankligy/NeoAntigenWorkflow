@@ -10,6 +10,7 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+from yattag import Doc
 
 def scratchPlusView1():     # directly use pool for multiprocessing
 
@@ -111,7 +112,7 @@ def loadPlusView():
     import bz2
     import _pickle as cpickle
     import pickle
-    with bz2.BZ2File('./data/dicTissueExp2.pbz2','rb') as f1:
+    with bz2.BZ2File('./data/dicTissueExp.pbz2','rb') as f1:
          dicTissueExp = cpickle.load(f1)  
     end = process_time()
     
@@ -120,15 +121,17 @@ def loadPlusView():
 
 
 def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
-    flag = 0
+    flag=0
     import warnings
     warnings.filterwarnings("ignore")
 
     if tissue=='all':
+        tissueList = []
+        summary = []
         try:
             tissueExp = dicTissueExp[event]
         except KeyError:
-            print('Don\'t detect expression of {0} in normal tissue'.format(event))
+            summary.append('Don\'t detect expression of {0} in normal tissue'.format(event))
         else:
 
             for tis,exp in tissueExp.items():
@@ -138,11 +141,12 @@ def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
 
                 if exp.size == 0: print('{0} data incomplete'.format(tis))
                 elif np.any(exp):   # have non-zero element
-                    
+                    tissueList.append(tis)
                     hits = sum([True if item > cutoff else False for item in exp]) # how many samples has PSI > 0.1
                     size = exp.size   # how many samples in total
 
-                    print('{0}:({1}/{2}) has PSI > {3}'.format(tis,hits,size,cutoff))
+                    out = '{0}:({1}/{2}) has PSI > {3}'.format(tis,hits,size,cutoff)
+                    summary.append(out)
                     
                     if plot=='True':
                         fig = plt.figure()
@@ -152,13 +156,13 @@ def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
                         plt.ylabel('PSI value')
                         plt.legend()
                         if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
-                        plt.savefig('./GTEx/{1}.pdf'.format(event,tis),bbox_inches='tight')
+                        plt.savefig('./GTEx/{1}.svg'.format(event,tis),bbox_inches='tight')
                         plt.close(fig)
                     else: continue
                 else: 
                     flag += 1
-                    print('No expression in {}'.format(tis))
-            print('{0} has no expression in {1} tissue types'.format(event,flag))
+                    summary.append('No expression in {}'.format(tis))
+            summary.append('{0} has no expression in {1} tissue types'.format(event,flag))
             
     else:
         try:
@@ -182,16 +186,102 @@ def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
                 plt.ylabel('PSI value')
                 plt.legend()
                 if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
-                plt.savefig('./{}.pdf'.format(tissue),bbox_inches='tight')
+                plt.savefig('./{}.svg'.format(tissue),bbox_inches='tight')
                 plt.show()
 
+    return tissueList,summary
+
+
+
+
+
+
+# html generator
+
+def display_header(event):
+    doc, tag, text, line = Doc().ttl()
+    with tag('div',klass='header'):
+        with tag('div',id='header_title'):
+            text('GTEx Viewer Report PSI')
+        with tag('div',id='header_event'):
+            text('{}'.format(event))
+    return doc.getvalue()
+
+def display_summary(tissueList):
+    doc, tag, text, line = Doc().ttl()
+    with tag('div',klass='summary'):
+        with tag('h2'):
+            text('Summary')
+        with tag('ul'):
+            with tag('li'):
+                with tag('a',href='#basic1'):
+                    text('Basic Summary(Expression)')
+            with tag('li'):
+                with tag('a',href='#basic2'):
+                    text('Basic Summary(No Expression)')
+
+            for i in range(len(tissueList)):
+                with tag('li'):
+                    with tag('a',href='#M{}'.format(i)):
+                        text('{}'.format(tissueList[i]))
+                             
+    return doc.getvalue()
+
+
+def display_main(tissueList,summary,cutoff):
+    doc, tag, text, line = Doc().ttl()
+    with tag('div',klass='main'):
+        with tag('div',klass='module'):
+            with tag('h2',id='basic1'):
+                text('Basic Summary(Expression-PSI>{})'.format(cutoff))
+            for j in range(len(summary)):
+                if not summary[j].startswith('No expression'):
+                    with tag('p'):
+                        text(summary[j])  
+            with tag('h2',id='basic2'):
+                text('Basic Summary(No expression)')
+            for k in range(len(summary)):
+                if summary[k].startswith('No expression'):
+                    with tag('p'):
+                        text(summary[k]) 
+        for i in range(len(tissueList)):
+            with tag('div',klass='module'):
+                with tag('h2',id='M{}'.format(i)):
+                    text('{}'.format(tissueList[i]))
+                with tag('p'):
+                    doc.stag('img',src='./GTEx/{}.svg'.format(tissueList[i]))
+    return doc.getvalue()
+
+def display_footer():
+    doc, tag, text, line = Doc().ttl()
+    with tag('div',klass='footer'):
+        doc.asis('Author: Guangyuan(Frank) Li <li2g2@mail.uc.edu>')
+    return doc.getvalue()
+
+def display_all(tissueList,event,summary,cutoff):
+    doc, tag, text, line = Doc().ttl()
+    doc.asis('<!DOCTYPE html>')
+    with tag('html'):
+        with tag('head'):
+            line('title','{}_report_PSI'.format(event))
+            doc.stag('link',rel='stylesheet',type='text/css',href='stype.css')
+        with tag('body'):
+            doc.asis(display_header(event))
+            doc.asis(display_summary(tissueList))
+            doc.asis(display_main(tissueList,summary,cutoff))
+            doc.asis(display_footer())
+    return doc.getvalue()
+
+def html_generator(tissueList,event,summary,cutoff):
+    with open('test.html','w') as f1:
+        f1.write(display_all(tissueList,event,summary,cutoff))
   
 
 def usage():
 
 
     print('Usage:')
-    print('python3 queryGTEx.py -e KYAT3:ENSG00000137944:E4.1-I4.1_88965413 -c 0.1 -m savage -t Prostate -p True')
+    print('python3 queryGTEx_PSI.py -e KYAT3:ENSG00000137944:E4.1-I4.1_88965413 -c 0.1 -m savage -t all -p True')
     print('Options:')
     print('-e --event : Splicing event you want to interrogate')
     print('-c --cutoff : cutoff value for PSI')
@@ -207,16 +297,17 @@ def main(event,mode,cutoff,tissue,plot):
     if mode == 'savage':
         print('Please wait for around 10 min to load the GTEx Data')
         dicTissueExp = loadPlusView()
-    flag = inspectGTEx(dicTissueExp,event,cutoff,tissue,plot)
-    return flag
+    tissueList,summary = inspectGTEx(dicTissueExp,event,cutoff,tissue,plot)
+    html_generator(tissueList,event,summary,cutoff)
+
 
 if __name__ == '__main__':
     import getopt
     import sys
 #    log_err = open('queryGTEx.stderr.log','a')
-#    log_out = open('queryGTEx.stdout.log','a')
+    #log_out = open('queryGTEx.stdout.log','a')
 #    sys.stderr = log_err
-#    sys.stdout = log_out
+    #sys.stdout = log_out
     try:
         options, remainder = getopt.getopt(sys.argv[1:],'he:c:m:t:p:',['help','event=','cutoff=','mode=','tissue=','plot='])
     except getopt.GetoptError as err:

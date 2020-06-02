@@ -1308,7 +1308,8 @@ def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonLis
 
 def third_round(df_second):  # after second run
     '''
-    1. [''] means trans-splicing(non-trailing), novel ordinal, intron retention
+    In second round
+    1. [''] means trans-splicing(non-trailing), novel ordinal, intron retention, they don't have '_' in the exon
     2. ['','','','',...''] means newsplicingsite, trans-splicing(trailing) or Alt5,3 but even trimming the trailing part can not match them to existing ones    
     
     '''
@@ -1528,8 +1529,8 @@ def main(intFile,dataFolder,outFolder,mode,cutoff_PSI,cutoff_sampleRatio,cutoff_
 #    outFolder = parser.outFolder
 #    print(intFile,dataFolder,outFolder)
     # get increased part
-    df = pd.read_csv(intFile,sep='\t')
-    df_ori = GetIncreasedPart(df)
+    df_ori = pd.read_csv(intFile,sep='\t')
+    #df_ori = GetIncreasedPart(df)
 
 
     
@@ -1559,8 +1560,9 @@ def main(intFile,dataFolder,outFolder,mode,cutoff_PSI,cutoff_sampleRatio,cutoff_
 
     # get tumor-specific part
     df_ori =  check_GTEx(df_ori,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio)   
-    # print(df_ori.shape[0])
-    # df_ori.to_csv('temp.txt',sep='\t',index=None)
+    if df_ori.shape[0] == 0: 
+        raise Exception('After checking GTEx, no events remain')
+    df_ori.to_csv(os.path.join(outFolder,'after_GTEx.txt'),sep='\t',index=None)
 
     print('Overlapping with human membrane proteins')
     
@@ -1571,6 +1573,8 @@ def main(intFile,dataFolder,outFolder,mode,cutoff_PSI,cutoff_sampleRatio,cutoff_
     EnsID = extract_EnsID(df_ori)
     df_ori['condition'] = [True if item in list(Ens2ACC.keys()) else False for item in EnsID]
     df_ori_narrow = df_ori[df_ori['condition'] == True]
+    if df_ori.shape[0] == 0:
+        raise Exception('After overlapping with membrane proteins, no events remain')
     df_ori_narrow = df_ori_narrow.drop(columns=['condition'])
 
 

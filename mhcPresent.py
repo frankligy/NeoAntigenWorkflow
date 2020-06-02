@@ -94,6 +94,10 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
         if write==True: self.df.to_csv('see{0}.txt'.format(name),sep='\t',index=None)
             
     def retrieveJunctionSite(self,dict_exonCoords,dict_fa):
+        '''
+        Caveat:
+        because of the overlapping issue in exonCoordinates, the resultant junction sequence, its both terminus might have one overhang
+        '''
         exam_seq,back_seq = [],[]
         for i in range(self.df.shape[0]):
             temp = uid(self.df,i)
@@ -110,7 +114,7 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
             back_seq.append(back_seq_join)
             
         self.df['exam_seq'] = exam_seq
-        self.df['back_seq'] = back_seq
+        #self.df['back_seq'] = back_seq
         
     def matchWithExonlist(self,df_exonlist,dict_exonCoords):
         col1,col2 = [],[]        
@@ -122,43 +126,505 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
             col1.append(core_match(df_exonlist,dict_exonCoords,EnsID,Exons_examined))
             col2.append(core_match(df_exonlist,dict_exonCoords,EnsID,Exons_back))
         self.df['exam_whole_transcripts'] = col1
-        self.df['back_whole_transcripts'] = col2
+        #self.df['back_whole_transcripts'] = col2
+
+    def rescueEvent_1(self):    # second round
+        for i in range(self.df.shape[0]):
+            temp = uid(self.df,i)
+            first = self.df['exam_whole_transcripts'].iloc[i]
+            hits = sum([True if item else False for item in first])
+            if hits == 0: # first round not able to match, launch second_round
+                result = second_round_mhc(temp)
+                self.df['exam_whole_transcripts'].iloc[i] = result
+
+    def rescueEvent_2(self):    # third round
+        for i in range(self.df.shape[0]):
+            temp = uid(self.df,i)
+            firstAndsecond = self.df['exam_whole_transcripts'].iloc[i]
+            hits = sum([True if item else False for item in firstAndsecond])
+            if hits == 0:  # first and second round still not able to match, launch third_round
+                result = third_round_mhc(temp,firstAndsecond)
+                self.df['exam_whole_transcripts'].iloc[i] = result
 
     def getORF(self):
-        col0,col1 = [],[]
-        for index,value in enumerate(['exam_whole_transcripts','back_whole_transcripts']): 
-            col = eval('col'+str(index))
-            for transcripts in list(self.df[value]):
-                if not transcripts: col.append(None)  # None's type is Nonetype
-                tempArray = []
-                for transcript in transcripts:
-                    if not transcript: tempArray.append('')
-                    else:
-                        maxTran = transcript2peptide(transcript)
-                        tempArray.append(maxTran)
-                col.append(tempArray)
-        self.df['exam_ORF_tran'] = col0
-        self.df['back_ORF_tran'] = col1
+        col = []
+        for i in range(self.df.shape[0]):
+            whole = self.df['exam_whole_transcripts'].iloc[i]  # ['TTTCGGGAGGCC','TTCCCGGGGGAAA'] OR ['','',''] OR ['intron'] OR ['unrecoverable']
+            if whole == ['intron'] or whole == ['unrecoverable']:
+                col.append(['None'])   # in ORF column, shown as ['None']
+            else:
+                hits = sum([True if item else False for item in whole])
+                if hits == 0: col.append(['None'])
+                else:
+                    tempArray = []
+                    for transcript in whole:
+                        if not transcript: tempArray.append('')
+                        else:
+                            maxTran = transcript2peptide(transcript)
+                            tempArray.append(maxTran)   
+                    col.append(tempArray)
+        self.df['exam_ORF_tran'] = col                         
+
+
         
     def getORFaa(self):
-        col0,col1 = [],[]
-        for index,value in enumerate(['exam_ORF_tran','back_ORF_tran']):
-            col = eval('col'+str(index))
-            for transcripts in list(self.df[value]):
-                if not transcripts: col.append(None)
+
+        col = []
+        for i in range(self.df.shape[0]):
+            ORF = self.df['exam_ORF_tran'].iloc[i]   # ['ATGGTCCCGT','ATGGGGGGGCCAAT'] OR ['None'] OR ['','','']
+            if ORF == ['None']: col.append(['None'])
+            else:
                 tempArray = []
-                for transcript in transcripts:
+                for transcript in ORF:
                     if not transcript: tempArray.append('')
                     else:
                         maxAA = str(Seq(transcript,generic_dna).translate(to_stop=False))
                         tempArray.append(maxAA)
                 col.append(tempArray)
-        self.df['exam_ORF_aa'] = col0
-        self.df['bacK_ORF_aa'] = col1
+        self.df['exam_ORF_aa'] = col
                     
 
+
+
+def third_round_mhc(temp,second):  # after second run
+    '''
+    In second round
+    1. [''] means trans-splicing(non-trailing), novel ordinal, intron retention, they don't have '_' in the exon
+    2. ['','','','',...''] means newsplicingsite, trans-splicing(trailing) or Alt5,3 but even trimming the trailing part can not match them to existing ones    
+    '''
+
+    EnsGID_this = list(temp.keys())[0].split(':')[1]
+    exam1 = list(temp.values())[0][0].split('-')[0]   # E22
+    exam2 = list(temp.values())[0][0].split('-')[1]   # ENSG:E31
+    second
+    if second == [''] and 'ENSG' in exam2:  # trans-splicing(non_trailing)
+        EnsGID_trans = exam2.split(':')[0]
+        exam2_trans = exam2.split(':')[1]
+        full_left = single_left_match(exam1,EnsGID_this)
+        full_right = single_right_match(exam2_trans,EnsGID_trans)
+        full = cat_left_right_asym(full_left,full_right)
+        result = full
+    elif 'I' in (exam1 + exam2) and second == ['']:   # intron retention
+        result = ['intron']
+    elif second == ['']:   # novel ordinal    # E3.4(exam1) - E5.1(exam2)
+        full_left = single_left_match(exam1,EnsGID_this)
+        full_right = single_right_match(exam2,EnsGID_this)
+        full = cat_left_right_sym(full_left,full_right)
+        result = full
+    else: # ['','',''] 
+        result = ['unrecoverable']
+
+    return result
+
+def cat_left_right_sym(full_left,full_right):
+    result = []
+    for i in range(len(full_left)):
+        left = full_left[i]
+        right = full_right[i]
+        if left and right: result.append(left+right)
+        else: result.append('')    # this certain transcript doesn't have left subexon and right exon simutaneously,if don't consider cross-concatenation
+    return result        
+    
+            
+def cat_left_right_asym(full_left,full_right):   # will store all possible combinations of former and latter sequence
+    result = []
+    for i in full_left:
+        for j in full_right:
+            if i and j: result.append(i + j)   # !!!!!!!! here I don't use ',' for seperating left and right portion
+            else: result.append('')
+    return result
+            
+            
+
+
+
+
+def single_left_match(exon,EnsGID):   # give you E22, return all sequence E1,E2,...E22
+    global dict_exonCoords
+    global dictExonList
+    global dict_fa
+    
+    transcripts = dictExonList[EnsGID]
+    result = []
+    for tran,item in transcripts.items():
+        Exons1 = '|' + exon    #|E22
+        Exons2 = exon + '|'    # E22|
+        if re.search(rf'{re.escape(Exons1)}',item) or re.search(rf'{re.escape(Exons2)}',item):
+            exons = item.split('|')
+            dict_judge = {}
+            for j in range(len(exons)):
+                coords = dict_exonCoords[EnsGID][exons[j]]
+                strand = coords[1]
+                judge = check_exonlist_general(exons,j,strand)
+                dict_judge[exons[j]] = judge  
+            bucket = []
+            for k in range(len(exons)):
+                if not exons[k] == exon:
+                    bucket.append(exons[k])
+                else:
+                    bucket.append(exons[k])
+                    break
+            full_left = ''
+            for m in range(len(bucket)):
+                coords = dict_exonCoords[EnsGID][bucket[m]]
+                strand = coords[1]
+                judge = dict_judge[bucket[m]]
+                if strand == '+' and judge:   
+                    frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsGID,coords[1]) # corresponds to abs_start, abs_end, strand
+                elif strand == '+' and not judge:
+                    frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsGID,coords[1]) 
+                elif strand == '-' and judge:
+                    frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsGID,coords[1])
+                elif strand == '-' and not judge:
+                    frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsGID,coords[1])  # because of the weird
+                    # expression of minus strand, need to draw an illustrator to visulize that.
+                full_left += frag
+            full_left = full_left.replace('\n','')
+            result.append(full_left)
+        else:
+            result.append('')
+            
+    return result
+        
+def single_right_match(exon,EnsGID):   # give you E22, return all sequence E22,E23,.....
+    global dict_exonCoords
+    global dictExonList
+    global dict_fa
+    
+    transcripts = dictExonList[EnsGID]
+    result = []
+    for tran,item in transcripts.items():
+        Exons1 = '|' + exon    #|E22
+        Exons2 = exon + '|'    # E22|
+        if re.search(rf'{re.escape(Exons1)}',item) or re.search(rf'{re.escape(Exons2)}',item):
+            exons = item.split('|')
+            dict_judge = {}
+            for j in range(len(exons)):
+                coords = dict_exonCoords[EnsGID][exons[j]]
+                strand = coords[1]
+                judge = check_exonlist_general(exons,j,strand)
+                dict_judge[exons[j]] = judge  
+            bucket = []
+            for k in range(len(exons)):
+                if not exons[k] == exon:
+                    continue
+                else:
+                    bucket.extend(exons[k:])
+                    break
+            full_right = ''
+            for m in range(len(bucket)):
+                coords = dict_exonCoords[EnsGID][bucket[m]]
+                strand = coords[1]
+                judge = dict_judge[bucket[m]]
+                if strand == '+' and judge:   
+                    frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsGID,coords[1]) # corresponds to abs_start, abs_end, strand
+                elif strand == '+' and not judge:
+                    frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsGID,coords[1]) 
+                elif strand == '-' and judge:
+                    frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsGID,coords[1])
+                elif strand == '-' and not judge:
+                    frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsGID,coords[1])  # because of the weird
+                    # expression of minus strand, need to draw an illustrator to visulize that.
+                full_right += frag
+            full_right = full_right.replace('\n','')
+            result.append(full_right)
+        else:
+            result.append('')
+            
+    return result    
+
+def second_round_mhc(temp):
+    EnsID=list(temp.keys())[0].split(':')[1]
+    exam1 = list(temp.values())[0][0].split('-')[0]
+    exam2 = list(temp.values())[0][0].split('-')[1]    
+    if '_' in exam1 and not '_' in exam2:    # mode 1
+        exam1_exon = exam1.split('_')[0]
+        exam1_coord = exam1.split('_')[1]
+        query = exam1_exon + '|' + exam2
+        result = second_match(EnsID,query,exam1_coord=exam1_coord)
+
+
+    if '_' not in exam1 and '_' in exam2:   # mode 2
+        exam2_exon = exam2.split('_')[0]
+        exam2_coord = exam2.split('_')[1]
+        query = exam1 + '|' + exam2_exon
+        result = second_match(EnsID,query,exam2_coord=exam2_coord)
+
+        
+    if '_' in exam1 and '_' in exam2:
+        exam1_exon = exam1.split('_')[0]
+        exam1_coord = exam1.split('_')[1]                
+        exam2_exon = exam2.split('_')[0]
+        exam2_coord = exam2.split('_')[1]
+        query = exam1_exon + '|' + exam2_exon
+        result = second_match(EnsID,query,exam1_coord=exam1_coord,exam2_coord=exam2_coord)
+
+    if not '_' in exam1 and not '_' in exam2:
+        result = ['']         # novel ordinal and intron retention and tran-splicing(non-trailing)
+    return result
+
                   
+def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonList {EnsGID:{EnsTID:exonlist,EnsTID:exonlist}}
+    global dict_exonCoords
+    global dictExonList
+    global dict_fa
+    
+    
+    
+    if exam1_coord==False: mode = 2   # trailing occur in latter one 
+    if exam2_coord==False: mode = 1   # trailing occur in former one
+    if not exam1_coord==False and not exam2_coord==False: mode = 3    # trailing occur in both ones
+    #print(mode)
+    exam1 = query.split('|')[0]
+    exam2 = query.split('|')[1]
+    transcripts = dictExonList[EnsID]
+    result = []
+    for tran,item in transcripts.items():
+        Exons1 = '|' + query
+        Exons2 = query + '|'        
+        if re.search(rf'{re.escape(Exons1)}',item) or re.search(rf'{re.escape(Exons2)}',item) or re.search(rf'{re.escape(query)}$',item):
+            exons = item.split('|')
+            dict_judge = {}
+            for j in range(len(exons)):
+                coords = dict_exonCoords[EnsID][exons[j]]
+                strand = coords[1]
+                judge = check_exonlist_general(exons,j,strand)
+                dict_judge[exons[j]] = judge
+            if mode == 1:
+                bucket_left, bucket_right = [],[]
+                for i in range(len(exons)):
+                    if not exons[i] == exam1:
+                        bucket_left.append(exons[i])
+                    else: 
+                        i += 1
+                        bucket_right.extend(exons[i:])
+                        break    # till now, we throw the exons before queried one to bucket_left, after queried one to bucket_right
+                if bucket_left:
+                    full_left = ''
+                    for k in range(len(bucket_left)):
+                        coords = dict_exonCoords[EnsID][bucket_left[k]]
+                        strand = coords[1]
+                        judge = dict_judge[bucket_left[k]]
+                        if strand == '+' and judge:   
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
+                        elif strand == '+' and not judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
+                        elif strand == '-' and judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
+                        elif strand == '-' and not judge:
+                            frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
+                            # expression of minus strand, need to draw an illustrator to visulize that.
+                        full_left += frag
+                    full_left = full_left.replace('\n','')
+                else:
+                    full_left = ''
                 
+                
+                
+                coords_query = dict_exonCoords[EnsID][exam1] 
+                strand_query = coords_query[1]
+                start = int(coords_query[2])
+                judge_query = dict_judge[exam1]
+                
+                
+                if strand_query == '+':
+    
+                    query_frag = query_from_dict_fa(dict_fa,start,int(exam1_coord),EnsID,strand_query)
+                    
+                elif strand_query == '-':
+                    if not judge_query: start = int(coords_query[2])+1
+                    query_frag = query_from_dict_fa(dict_fa,start,int(exam1_coord),EnsID,strand_query)
+                
+
+                query_frag = query_frag.replace('\n','')
+                
+                
+                
+                if bucket_right:
+                    full_right = ''
+                    for k in range(len(bucket_right)):
+                        coords = dict_exonCoords[EnsID][bucket_right[k]]
+                        strand = coords[1]
+                        judge = dict_judge[bucket_right[k]]
+                        if strand == '+' and judge:   
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
+                        elif strand == '+' and not judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
+                        elif strand == '-' and judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
+                        elif strand == '-' and not judge:
+                            frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
+                            # expression of minus strand, need to draw an illustrator to visulize that.
+                        full_right += frag
+                    full_right = full_right.replace('\n','')
+                else:
+                    full_right = ''
+                    
+                full = full_left + query_frag + full_right
+                result.append(full)
+            
+            if mode == 2:
+                bucket_left, bucket_right = [],[]
+                for i in range(len(exons)):
+                    if not exons[i] == exam2:
+                        bucket_left.append(exons[i])
+                    else: 
+                        i += 1
+                        bucket_right.extend(exons[i:])
+                        break    # till now, we throw the exons before queried one to bucket_left, after queried one to bucket_right
+                #print(bucket_left,bucket_right)
+                if bucket_left:
+                    full_left = ''
+                    for k in range(len(bucket_left)):
+                        coords = dict_exonCoords[EnsID][bucket_left[k]]
+                        strand = coords[1]
+                        judge = dict_judge[bucket_left[k]]
+                        if strand == '+' and judge:   
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
+                        elif strand == '+' and not judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
+                        elif strand == '-' and judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
+                        elif strand == '-' and not judge:
+                            frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
+                            # expression of minus strand, need to draw an illustrator to visulize that.
+                        full_left += frag
+                    full_left = full_left.replace('\n','')
+                else:
+                    full_left = ''
+                    
+                #print(full_left)
+                    
+                coords_query = dict_exonCoords[EnsID][exam2] 
+                #print(coords_query)
+                strand_query = coords_query[1]
+                judge_query = dict_judge[exam2]
+                end = int(coords_query[3])
+                
+                
+                if strand_query == '+':
+                    if not judge_query: end = int(coords_query[3])-1
+                    query_frag = query_from_dict_fa(dict_fa,int(exam2_coord),end,EnsID,strand_query)
+                    
+                elif strand_query == '-':
+                    query_frag = query_from_dict_fa(dict_fa,int(exam2_coord),end,EnsID,strand_query)
+                
+
+                query_frag = query_frag.replace('\n','')
+                
+                if bucket_right:
+                    full_right = ''
+                    for k in range(len(bucket_right)):
+                        coords = dict_exonCoords[EnsID][bucket_right[k]]
+                        strand = coords[1]
+                        judge = dict_judge[bucket_right[k]]
+                        if strand == '+' and judge:   
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
+                        elif strand == '+' and not judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
+                        elif strand == '-' and judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
+                        elif strand == '-' and not judge:
+                            frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
+                            # expression of minus strand, need to draw an illustrator to visulize that.
+                        full_right += frag
+                    full_right = full_right.replace('\n','')
+                else:
+                    full_right = ''
+                    
+                full = full_left + query_frag + full_right
+                #print(full)
+                result.append(full)
+            
+            if mode == 3:
+                bucket_left, bucket_right = [],[]
+                for i in range(len(exons)):
+                    if not exons[i] == exam1:
+                        bucket_left.append(exons[i])
+                    else: 
+                        i += 2
+                        bucket_right.extend(exons[i:])
+                        break    # till now, we throw the exons before queried one to bucket_left, after queried one to bucket_right
+                if bucket_left:
+                    full_left = ''
+                    for k in range(len(bucket_left)):
+                        coords = dict_exonCoords[EnsID][bucket_left[k]]
+                        strand = coords[1]
+                        judge = dict_judge[bucket_left[k]]
+                        if strand == '+' and judge:   
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
+                        elif strand == '+' and not judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
+                        elif strand == '-' and judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
+                        elif strand == '-' and not judge:
+                            frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
+                            # expression of minus strand, need to draw an illustrator to visulize that.
+                        full_left += frag
+                    full_left = full_left.replace('\n','')
+                else:
+                    full_left = ''
+                    
+                coords_query1 = dict_exonCoords[EnsID][exam1]  
+                start1 = int(coords_query1[2])
+                strand_query1 = coords_query1[1]
+                judge_query1 = dict_judge[exam1]
+                if strand_query1 == '+':
+                    query_frag1 = query_from_dict_fa(dict_fa,start1,int(exam1_coord),EnsID,strand_query)
+                elif strand_query1 == '-':
+                    if not judge_query1: start1 = int(coords_query1[2]) + 1
+                    query_frag1 = query_from_dict_fa(dict_fa,start1,int(exam1_coord),EnsID,strand_query)
+                query_frag1 = query_frag1.replace('\n','')
+                    
+                coords_query2 = dict_exonCoords[EnsID][exam2] 
+                strand_query2 = coords_query[1]
+                judge_query2 = dict_judge[exam2]
+                end2 = int(coords_query2[3])
+                
+                if strand_query2 == '+':
+                    if not judge_query2: end2 = int(coords_query2[3])-1
+                    query_frag2 = query_from_dict_fa(dict_fa,int(exam2_coord),end2,EnsID,strand_query)
+                elif strand_query == '-':
+                    query_frag2 = query_from_dict_fa(dict_fa,int(exam2_coord),end2,EnsID,strand_query)
+                    
+                query_frag2 = query_frag2.replace('\n','')
+                
+                '''
+                Remember: the arguments to query_from_dict_fa is very simple, it is just the coord[2] and coord[3],
+                no matter which strand it is on. The positive position of the start and end of a segment.
+                
+                if judge is false:
+                    1. '+': coords[3] - 1 
+                    2. '-': coords[2] + 1
+                
+                
+                '''
+                
+                if bucket_right:
+                    full_right = ''
+                    for k in range(len(bucket_right)):
+                        coords = dict_exonCoords[EnsID][bucket_right[k]]
+                        strand = coords[1]
+                        judge = dict_judge[bucket_right[k]]
+                        if strand == '+' and judge:   
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1]) # corresponds to abs_start, abs_end, strand
+                        elif strand == '+' and not judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],int(coords[3])-1,EnsID,coords[1]) 
+                        elif strand == '-' and judge:
+                            frag = query_from_dict_fa(dict_fa,coords[2],coords[3],EnsID,coords[1])
+                        elif strand == '-' and not judge:
+                            frag = query_from_dict_fa(dict_fa,int(coords[2])+1,coords[3],EnsID,coords[1])  # because of the weird
+                            # expression of minus strand, need to draw an illustrator to visulize that.
+                        full_right += frag
+                    full_right = full_right.replace('\n','')
+                else:
+                    full_right = ''
+                    
+                full = full_left + query_frag1 + query_frag2 + full_right
+                result.append(full)   
+        else:
+            result.append('')
+    return result                
             
             
 
@@ -170,77 +636,105 @@ class NeoJ(Meta):
     def phaseTranslateJunction(self):
         col0,col1 = [],[]
         for i in range(self.df.shape[0]):
-            wholeTrans = list(self.df['exam_whole_transcripts'])[i]
-            ORFtrans = list(self.df['exam_ORF_tran'])[i]
+            wholeTrans = list(self.df['exam_whole_transcripts'])[i]   # ['TTTCGGGAGGCC','TTCCCGGGGGAAA'] OR ['','',''] OR ['intron'] OR ['unrecoverable']
+            ORFtrans = list(self.df['exam_ORF_tran'])[i]   # ['ATGGTCCCGT','ATGGGGGGGCCAAT'] OR ['None'] OR ['','','']
             junctionOri = list(self.df['exam_seq'])[i]  # have comma to delimit former and latter part
             junction = list(self.df['exam_seq'])[i].replace(',','')
-            phaseArray,peptideArray = [],[]
-            if not wholeTrans:             # the EnsGID doesn't exist in mRNA-exon file
-                phaseArray.append('#')
-                peptideArray.append('#')
-                print('This gene {0} is absent in mRNA-ExonID file\n'.format(list(self.df['UID'])[i]))
-            for j in range(len(wholeTrans)):
-                if not wholeTrans[j]: 
-                    phaseArray.append('') 
-                    peptideArray.append('') # splicing evnet can not match to this transcript
-                else:
-                    startJun = wholeTrans[j].find(junction[:-1]) # trim the right-most overhang for simplicity
-                    endJun = startJun + len(junction[:-1])
-                    startORF = wholeTrans[j].find(ORFtrans[j])
-                    endORF = startORF + len(ORFtrans[j])
-                    if startJun > endORF or endJun < startORF:
-                        phase = '*'  # means junction site will not be translated
-                        peptide = '*'
-                        phaseArray.append(phase)
-                        peptideArray.append(phase)
-                        print('The {}th transcript of {}, even though junction site could match with, but optimal ORF suggests that junction site will not be translated'.format(j,list(self.df['UID'])[i]))
-                    else: 
-                        former = junctionOri.find(',')  # length of former part, also the index of splicesite
-                        phase = abs(startJun + former - startORF) % 3 
-                        N = self.mer
-                         
-                        if phase == 0: 
-                            front=0 if former - ((N-1)*3) < 0 else (former - (N-1)*3)
-                            
-                            junctionSlice = junction[front: former + ((N-1)*3)].replace(',','')
-                            #print(junctionSlice)
-                        elif phase == 1: 
-                            front=0 if former - ((N-1)*3+1) <0 else (former - ((N-1)*3+1))
-                            junctionSlice = junction[front: former + ((N-1)*3+2)].replace(',','')
-                            
-                        elif phase == 2: 
-                            front=0 if former - ((N-1)*3+2) <0 else (former - ((N-1)*3+2))
-                            junctionSlice = junction[front: former + ((N-1)*3+1)].replace(',','')
-                 
-            
-                        peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
 
-                        phaseArray.append(phase)
-                        peptideArray.append(peptide)
+            if wholeTrans == ['intron'] or wholeTrans == ['unrecoverable']: 
+                col0.append(['None'])
+                col1.append(['None'])
+            else: 
+                hits_w = sum([True if item else False for item in wholeTrans])
+                hits_o = sum([True if item else False for item in ORFtrans])
+                if hits_w == 0 or hits_o ==0:
+                    col0.append(['None'])
+                    col1.append(['None'])
+                else:
+                    phaseArray,peptideArray = [],[]
+                    for j in range(len(wholeTrans)):
+                        if not wholeTrans[j]: 
+                            phaseArray.append('') 
+                            peptideArray.append('') 
+                        else:
+                            '''
+                            To better understand the following process: test this code snippet
+
+                            whole = 'AAAAATTTTTCCCCCGGGGG'
+                            orf = 'TTTTTCCCCC'
+                            junction = 'CCCC,GGGG'
+                            junction_n = junction.replace(',','')
+
+                            startORF = whole.find(orf)
+                            endORF = startORF + len(orf)-1
+                            startJun = whole.find(junction_n[:-1])
+                            endJun = startJun + len(junction_n[:-1]) -1 
+
+                            former = junction.find(',')
+
+                            phase = abs(startJun + former - startORF) % 3 
+                            '''
+                            startJun = wholeTrans[j].find(junction[:-1]) # trim the right-most overhang for simplicity
+                            endJun = startJun + len(junction[:-1]) - 1
+                            startORF = wholeTrans[j].find(ORFtrans[j])
+                            endORF = startORF + len(ORFtrans[j]) - 1
+                            if startJun > endORF or endJun < startORF:
+                                phase = '*'  # means junction site will not be translated
+                                peptide = '*'
+                                phaseArray.append(phase)
+                                peptideArray.append(phase)
+                                print('The {}th transcript of {}, even though junction site could match with, but optimal ORF suggests that junction site will not be translated'.format(j,list(self.df['UID'])[i]))
+                            else: 
+                                former = junctionOri.find(',')  # length of former part, also the index of splicesite
+                                phase = abs(startJun + former - startORF) % 3  
+                                '''
+                                # CCCCC,GGGGG
+                                the first triplet: ,GGG, no protruding to the left of comma, phase = 0
+                                the first triplet: C,GG, one protruding to the left of comma, phase = 1
+                                the first triplet: CC,G, two protruding to the left of comman, phase = 2
+                                '''
+                                N = self.mer
+                                
+                                if phase == 0: 
+                                    front=0 if former - ((N-1)*3) < 0 else (former - (N-1)*3)
+                                    
+                                    junctionSlice = junction[front: former + ((N-1)*3)].replace(',','')
+                                    #print(junctionSlice)
+                                elif phase == 1: 
+                                    front=0 if former - ((N-1)*3+1) <0 else (former - ((N-1)*3+1))
+                                    junctionSlice = junction[front: former + ((N-1)*3+2)].replace(',','')
+                                    
+                                elif phase == 2: 
+                                    front=0 if former - ((N-1)*3+2) <0 else (former - ((N-1)*3+2))
+                                    junctionSlice = junction[front: former + ((N-1)*3+1)].replace(',','')
+                        
+                    
+                                peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+
+                                phaseArray.append(phase)
+                                peptideArray.append(peptide)
             
-            col0.append(phaseArray) 
-            col1.append(peptideArray)
-        self.df['phase'] = col0 # ['',1,'*',2] OR ['#']
-        self.df['peptide'] = col1  # ['',MSTTG,'*',TYCTT] OR ['#']
+                    col0.append(phaseArray) 
+                    col1.append(peptideArray)
+        self.df['phase'] = col0 # ['',1,'*',2] OR ['None']
+        self.df['peptide'] = col1  # ['',STTG,'*',TYCTT] OR ['None']
                 
     def getNmer(self):
         col = []
         for i in range(self.df.shape[0]):
             print(i,'first round-Process{}'.format(os.getpid()))
-            peptides = list(self.df['peptide'])[i]
-            merArray = []
-            condition = any([False if pep=='' else True for pep in peptides]) # if False, means ['','',''], means can not match with any of existing transcript
-            if not condition: merArray.append('MANNUAL')
+            peptides = list(self.df['peptide'])[i]   
+
+            if peptides == ['None']: col.append(['MANNUAL'])
             else:
+                merArray = []
                 for peptide in peptides:
                     if peptide == '': merArray.append('')
                     elif peptide == '*': merArray.append('*')
                     else: 
-                        tempArray = extractNmer(peptide,self.mer)
+                        tempArray = extractNmer(peptide,self.mer)   # if no Nmer, it will return a [], otherwise, ['DTDDTY','YTUYDD']
                         merArray.append(tempArray)
-            truthTable1 = [False if mer == '*' or mer == [] or mer== '' else True for mer in merArray]
-            if not any(truthTable1): merArray = ['Match but no translation or early stop']
-            col.append(merArray)  # [ '','*',[], ['MTDJDKFDJF','FJDKFJDF'] ]
+                col.append(merArray)  # [ '','*',[], ['MTDJDKFDJF','FJDKFJDF'] ]
         self.df['{0}mer'.format(self.mer)] = col
         
                  
@@ -259,32 +753,36 @@ class NeoJ(Meta):
                 try: x[1].split(':')[2]
                 except IndexError: backEvent = x[1].split(':')[1]
                 else: backEvent = x[1].split(':')[2]   
-                if 'ENSG' in event:  # E4.3--ENSG00000267881:E2.1
-                    # nearly the same as newSpliicng, query is former subexon, trailing is replaced as breaking point(start coordinate of former subexon + length of former part - 1)
+
+
+                if 'ENSG' in event:  # E4.3--ENSG00000267881:E2.1_43874384   # trans-splicing with trailing needs to be rescued
+            
                     merArray = tranSplicing(event,EnsGID,junction,self.mer,dictExonList,dict_exonCoords)
                     if merArray == [[]]: merArray = ['transplicing, already checked, query subexon not present in known transcript']
+
                 if re.search(r'I.+_\d+',event) or 'U' in event:  # they belong to NewExon type: including UTR type and blank type(the annotation is blank)
-                # for NewExon type, no need to infer translation phase, just use junction sequence, mer should span junction site
+                    # don't infer translation frame for this type, for simplicity
                     junctionIndex = junction.find(',')
                     Nminus1 = self.mer - 1 
                     front = 0 if junctionIndex-(Nminus1*3+2) < 0 else junctionIndex-(Nminus1*3+2)
                     junctionSlice = junction[front:junctionIndex+(Nminus1*3+2)].replace(',','') # no need to worry out of index, slicing operation will automatically change it to 'end' if overflow
                     merArray = dna2aa2mer(junctionSlice,self.mer)   # merArray is a nested list
-                if re.search(r'E\d+\.\d+_\d+',event):  # they belong to newSplicing site or fusion gene
-                # for this type, just check if the former part (E1.2-E3.4, here E1.2 is former part) exist in known transcript, then infer the phase of translation
-                    #print(event)
+
+                if re.search(r'E\d+\.\d+_\d+',event):  # they belong to newSplicing site that can not be rescued in second round
+                
                     merArray = newSplicingSite(event,EnsGID,junction,self.mer,dictExonList,dict_exonCoords)   # nested list
                     if merArray == [[]]: merArray = ['newSplicing, already checked, query subexon not present in known transcript']
 
                 if re.search(r'^I\d+\.\d+-',event) or re.search(r'-I\d+\.\d+$',event):
                     merArray = intron(event,EnsGID,junction,dict_exonCoords,dictExonList,self.mer)  # nested list
                     if merArray == [[]]: merArray = ['intron retention, already checked, either former subexon not present in known transcript or matched transcript is not Ensembl-compatible ID']
-                if re.search(r'E\d+\.\d+-E\d+\.\d+$',event):   # novel splicing: CLASP1:ENSG00000074054:E25.1-E26.1, just don't match with any existing one
+                
+                if re.search(r'E\d+\.\d+-E\d+\.\d+$',event):   # novel ordinal but not able to be rescued by third round
                     # here we extract the backEvent, which is E24.1-E27.1
                     #print(event)
                     backEvent = backEvent.replace('-','|')  # now it is E24.1|E27.1
                     merArray = novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,self.mer)
-                    if merArray ==[[]]: merArray = ['novel ordinal splicing event, already checked, its background event can not match up with any existing transcript either']
+                    if merArray ==[[]]: merArray = ['novel ordinal splicing event, already checked, its former part can not match up with any existing transcript either']
                     
             col.append(merArray)
         self.df['mannual'] = col
@@ -429,19 +927,20 @@ class netMHCpan():
 
         
 def novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,N): # E25.1-E26.1
-    latter = event.split('-')[1]  # E26.1
-    attrs = dict_exonCoords[EnsGID][latter] #  chr, strand, start, end
-    strand,start = attrs[1], attrs[2]
+    former = event.split('-')[0]  # E25.1
+    attrs = dict_exonCoords[EnsGID][former] #  chr, strand, start, end
+    strand,start,end = attrs[1], attrs[2], attrs[3]
+    breaking = int(end) + 1
     merBucket = []
     allTransDict = dictExonList[EnsGID]
     for tran,exonlist in allTransDict.items():
-        if backEvent in exonlist:
+        if former in exonlist:
             try:tranStartIndex = grabEnsemblTranscriptTable(tran)
             except HTTPError: continue
             else:
                 if type(tranStartIndex) == int:
                      if strand == '+':
-                         remainder = (int(start) - tranStartIndex) % 3   
+                         remainder = (int(breaking) - tranStartIndex) % 3   
                          if remainder == 0: 
                              front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
                              junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
@@ -453,7 +952,7 @@ def novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,N)
                              junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
                      elif strand == '-':
 
-                         remainder = (tranStartIndex - int(start)) % 3 
+                         remainder = (tranStartIndex - int(breaking)) % 3 
                          if remainder == 0: 
                              front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
                              junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
@@ -469,11 +968,11 @@ def novelOrdinal(event,backEvent,EnsGID,junction,dictExonList,dict_exonCoords,N)
                      else:
                         merArray = extractNmer(peptide,N) 
                         merBucket.append(merArray)
-        if merBucket == []: merBucket = [[]]  # means no match for the backevent for preexisting bugs
+        if merBucket == []: merBucket = [[]]  # means no match for the former for preexisting bugs
            
     return merBucket
                             
-def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-ENSG00000267881:E2.1
+def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3_47384738-ENSG00000267881:E2.1 or E4.3-ENSG00000267881:E2.1_43898439
     query = event.split('-')[0]
     formerLength = len(junction.split(',')[0])
     merBucket = []
@@ -481,11 +980,11 @@ def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-
     except KeyError: #E6.1_3854692-ENSG00000267881:E2.1
         print('complicated situation(both trailing and transplicing):{0},{1}'.format(EnsGID,event))
         trailing = query.split('_')[1]  #  3854692
-        breaking = int(trailing)+1
+        breaking = int(trailing)+1   # the nucleotide immediately after comma
     else:
         strand = attrs[1]
-        start = attrs[2]
-        breaking = int(start)+formerLength
+        end = attrs[3]
+        breaking = int(end)+1             # the nucleotide immediately after comma
     finally:
         allTranDict = dictExonList[EnsGID]
         for tran,exonlist in allTranDict.items():
@@ -507,7 +1006,7 @@ def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-
                                 junctionSlice = junction[junction.find(',') - ((N-1)*3+2):junction.find(',')+((N-1)*3+1)].replace(',','')
                         elif strand == '-':
     
-                            remainder = (tranStartIndex - int(breaking)) % 3 
+                            remainder = (tranStartIndex - int(breaking)) % 3    # assume tranStartIndex returned by Ensembl is also the position regarding to postive strand,actually doesn't matter, negative is the same for taking remainder
                             if remainder == 0: 
                                 front = 0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
                                 junctionSlice = junction[front:junction.find(',')+((N-1)*3)].replace(',','')
@@ -526,15 +1025,19 @@ def tranSplicing(event,EnsGID,junction,N,dictExonList,dict_exonCoords):  # E4.3-
         if merBucket == []: merBucket = [[]]  # means no match for the former subexon or preexisting bugs
     return merBucket
 
-def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # one stop solution for newSplicingSite type
-    #print(event)
+def newSplicingSite(event,EnsGID,junction,N,dictExonList,dict_exonCoords):   # alternative 3' or 5', its naked subexons still doesn't match with any existing one
+
     try: event.split('-')[0].split('_')[1]   # see if the former one has trailing part E1.2_8483494
     except IndexError: 
         former = event.split('-')[0]  # no trailing part, former part just E1.2, means newSplicingSite is in latter part
         query = former
-        attrs = dict_exonCoords[EnsGID][query]
-        start = attrs[2]
-        trailing = int(start) + len(junction.split(',')[0])   # the coordinates of latter part position1
+        try:
+            attrs = dict_exonCoords[EnsGID][query]
+        except KeyError:
+            print('{0} in {1}, preexisting bugs'.format(query,EnsGID))
+            raise Exception('Please move out this event:{0} in {1}'.format(query,EnsGID))
+        end = attrs[3]
+        trailing = int(end) + 1   # the coordinates of latter part position1
     else: 
         query = event.split('-')[0].split('_')[0]  # has trailing part, former part should get rid of trailing part
         trailing = int(event.split('-')[0].split('_')[1]) + 1    # the coordinates of latter part position1
@@ -772,70 +1275,42 @@ def check_exonlist_general(exonlist,index,strand):
         if str(query_subexon_num + 1) in dict[query_exon_num]: return False
         else: return True
         
-def neoJunctions_oldMethod_noGTEx(df,colname):
-    dfNeoJunction = df[((df['dPSI'] >= 0.3) & (df[colname] <= 0.23))]
-    return dfNeoJunction
 
-def neoJunction_oldMethod_checkGTEx(df,colname,dicTissueExp):
-    condition = []
-    for i in range(df.shape[0]):
-        event = df.iloc[i]['UID']
-        healthy = df.iloc[i][colname]
-        dPSI = df.iloc[i]['dPSI']
-        if dPSI >= 0.3 and healthy <= 0.23: 
-            try:inspect = inspectGTEx(event,dicTissueExp,plot=False)
-            except KeyError: cond = True    # absent in normal GTEx data set
-            else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
-        else: cond = False
-        condition.append(cond)
-    condition = pd.Series(condition)
-    df_Neo = df[condition]
-    return df_Neo
-
-def neoJunction_newMethod_checkGTEx(df,dicTissueExp):
-    condition = []
-    for i in range(df.shape[0]):
-        event = df.iloc[i]['UID']
-        per_h = df.iloc[i]['healthy_zero_percent']
-        if per_h > 0.95:
-            try:inspect = inspectGTEx(event,dicTissueExp,plot=False)
-            except KeyError: cond = True    # absent in normal GTEx data set
-            else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
-        else: cond = False
-        condition.append(cond)
-    condition = pd.Series(condition)
-    df_Neo = df[condition]
-    return df_Neo
-
-
-def neoJunction_newMethod_noGTEx(df):
-    condition = []
-    for i in range(df.shape[0]):
-        event = df.iloc[i]['UID']
-        per_h = df.iloc[i]['healthy_zero_percent']
-        if per_h > 0.95:
-            cond = True
-        else: cond = False
-        condition.append(cond)
-    condition = pd.Series(condition)
-    df_Neo = df[condition]
-    return df_Neo
         
 def neoJunction_testMethod_noGTEx(df):
     return df        
         
-def neoJunction_testMethod_checkGTEx(df,dicTissueExp):
-    condition = []
+def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
+    col = []
     for i in range(df.shape[0]):
-        event = df.iloc[i]['UID']
-
-        try:inspect = inspectGTEx(event,dicTissueExp,plot=False)
-        except KeyError: cond = True    # absent in normal GTEx data set
-        else: cond = True if inspect==49 else False  # =49 means have no expression in all tissue
-        condition.append(cond)
-    condition = pd.Series(condition)
-    df_Neo = df[condition]
-    return df_Neo          
+        UID = df.iloc[i]['UID']
+        event = UID.split('|')[0]       # foreground event
+        try:
+            tissueExp = dicTissueExp[event]  # {heart:[],brain:[]}   # values are ndarray
+        except KeyError:
+            cond = True
+            col.append(cond)
+        else:
+            tissueCounter = 0
+            for tis,exp in tissueExp.items():
+    
+                exp = exp.astype('float64')
+                exp[np.isnan(exp)] = 0.0   # nan means can not detect the gene expression
+                hits = sum([True if i > cutoff_PSI else False for i in exp])   # in a tissue, how many samples have PSI > cutoff value
+                total = exp.size    # how many samples for each tissue type
+                sampleRatio = hits/total    # percentage of sampels that are expressing this event
+                if sampleRatio > cutoff_sampleRatio: tissueCounter += 1   # this tissue is expressiing this event
+            tissueRatio = tissueCounter/54    # 54 tissue types in total
+            if tissueRatio > cutoff_tissueRatio:
+                cond = False
+                col.append(cond)
+            else: 
+                cond = True
+                col.append(cond)
+    df['cond'] = col
+    new_df = df[df['cond']]
+    new_df = new_df.drop(columns = ['cond'])
+    return new_df       
         
     
 def uid(df, i):
@@ -1026,7 +1501,7 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
     if event.startswith('E'):   # only consider this situation, since intron retentions are predominantly associated with a translatable preceding exon, ending up with a early stop codon
         # namely: E2.4-I2.1, E22.1-I22.1
         former = event.split('-')[0]  # E2.4, E22.1
-        latter = event.split('-')[1]
+        latter = event.split('-')[1]   # I2.1
         #print(event,EnsGID,former)
         try: attrs_former = dict_exonCoords[EnsGID][former] # chr, strand, start, end
         except KeyError: print('preexisting bug, Event {0} in {1} doesn\'t have {2}!!!!!'.format(event,EnsGID,former))
@@ -1036,13 +1511,12 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
             allTransDict = dictExonList[EnsGID] 
             for tran,exonlist in allTransDict.items():
                 if former in exonlist: 
-                    #print(tran,'*******************************************************')
                     try:tranStartIndex = grabEnsemblTranscriptTable(tran)
                     except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
                     else:
                         if type(tranStartIndex) == int:
                             if strand == '+':
-                                intronStartIndex = int(attrs_latter[3])
+                                intronStartIndex = int(attrs_latter[2])   # index by intron itself
                                 remainder = (intronStartIndex - tranStartIndex) % 3   # how many nts remaining before the first nt in intron
                                 # if 0, means the first nt in intron will be the first nt in codon triplet,
                                 # if 1, means the first nt in intron will be the second nt in codon triplet,
@@ -1057,7 +1531,7 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
                                     front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
                                     junctionSlice = junction[front:].replace(',','')
                             elif strand == '-':
-                                intronStartIndex = int(attrs_latter[3]) - 1
+                                intronStartIndex = int(attrs_latter[3]) 
                                 remainder = (tranStartIndex - intronStartIndex) % 3 
                                 if remainder == 0: 
                                     front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
@@ -1142,24 +1616,28 @@ def run(NeoJBaml):
 
     print('retrieve all junction site sequence-Process:{0}\n'.format(PID))
     NeoJBaml.retrieveJunctionSite(dict_exonCoords,dict_fa)
-    print('finished retrieving all junction site sequence-Process:{0}\n'.format(PID))
+ 
     print('inspecting each event see if they could match up with any existing transcripts-Process:{0}\n'.format(PID))
     NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
-    print('finished inspecting each event see if they could match up with any existing transcripts-Process:{0}\n'.format(PID))
+    NeoJBaml.rescueEvent_1()
+    NeoJBaml.rescueEvent_2()
+ 
     print('getting most likely ORF and ORFaa for each event that could match up with existing transcript-Process:{0}\n'.format(PID))
     NeoJBaml.getORF()
     NeoJBaml.getORFaa()
-    print('finished getting most likely ORF and ORFaa-Process:{0}\n'.format(PID))
+
     print('checking the phase of each event\'s junction site-Process:{0}\n'.format(PID))
     NeoJBaml.phaseTranslateJunction()
-    print('finished checking the phase of each event\'s junction site-Process:{0}\n'.format(PID))
+
     print('getting Nmer, only for first round-Process:{0}\n'.format(PID))
     NeoJBaml.getNmer()
+
     print('first round ends-Process:{0}\n'.format(PID))
 
     print('starting to mannal check,second round-Process:{0}\n'.format(PID))
     NeoJBaml.mannual()
     print('finished mannual check-Process:{0}\n'.format(PID))
+
     print('starting to deploy netMHCpan-Process:{0}\n'.format(PID))
     if MHCmode == 'MHCI':
         NeoJBaml.netMHCresult(HLA,software,MHCmode)
@@ -1169,7 +1647,7 @@ def run(NeoJBaml):
     return NeoJBaml.df
 
 
-def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkGTEx=False,EventAnnotationFile='dummy.txt',GroupsFile='proxy.txt'):
+def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,checkGTEx,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
 
     startTime = process_time()
     global df
@@ -1182,69 +1660,21 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     if not os.path.exists(os.path.join(outFolder,'resultMHC','figures')): os.makedirs(os.path.join(outFolder,'resultMHC','figures'))
     print('loading input files\n')
     df = pd.read_csv(intFile,sep='\t') 
-    print('finished loading input files\n')
     print('loading all existing transcripts files\n')
     df_exonlist = pd.read_csv(os.path.join(dataFolder,'mRNA-ExonIDs.txt'),sep='\t',header=None,names=['EnsGID','EnsTID','EnsPID','Exons'])
-    print('finished loading all existing transcripts files\n')
     print('loading all subexon coordinates files\n')
     dict_exonCoords = exonCoords_to_dict(os.path.join(dataFolder,'Hs_Ensembl_exon.txt'),'\t')
-    print('finished loading all subexon coordinates files\n')
     print('loading exon sequence fasta files, 2GB\n')
     dict_fa = fasta_to_dict(os.path.join(dataFolder,'Hs_gene-seq-2000_flank.fa'))
-    print('finished loading exon sequence fasta files\n')
-    print('converting subexon coordinates to a dictionary-Process\n')
+    print('converting subexon coordinates to a dictionary\n')
     dictExonList = convertExonList(df_exonlist)
-    print('finished converting subexon coordinates to a dictionary\n')
-    if mode == 'OncoSplice' and checkGTEx=='True':
-        dfori = pd.read_csv(EventAnnotationFile,sep='\t')
-        dfgroup = pd.read_csv(GroupsFile,sep='\t',header=None,names=['TCGA-ID','group','label'])
-        print('loading GTEx dataset, it will take 20 mins, please be patient')
 
-        start = process_time()
 
-        with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
-            dicTissueExp = cpickle.load(f1)  
-            end = process_time()    
-        print('consume {0}'.format(end-start))
-        
-        metaBaml = Meta(df) #Instantiate Meta object
-        metaBaml.getPercent(dfgroup,dfori,'{0}_All'.format(taskName),write=True)
-        print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_newMethod_checkGTEx(metaBaml.df,dicTissueExp)
-        print('NeoJunctions are ready\n')
     
-    if mode == 'OncoSplice' and checkGTEx == 'False':
-        dfori = pd.read_csv(EventAnnotationFile,sep='\t')
-        dfgroup = pd.read_csv(GroupsFile,sep='\t',header=None,names=['TCGA-ID','group','label'])
-        metaBaml = Meta(df) #Instantiate Meta object
-        metaBaml.getPercent(dfgroup,dfori,'{0}_All'.format(taskName),write=True)
-        print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_newMethod_noGTEx(metaBaml.df)
-        print('NeoJunctions are ready\n')
-    
-    
-        
-    if mode == 'TumorAndControl' and checkGTEx == 'True':
-        print('loading GTEx dataset, it will take 20 mins, please be patient')
-        start = process_time()
-        with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
-            dicTissueExp = cpickle.load(f1)  
-            end = process_time()    
-        print('consume {0}'.format(end-start))
-        metaBaml = Meta(df) #Instantiate Meta object
-        print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_oldMethod_checkGTEx(metaBaml.df,colname,dicTissueExp)
-        dfNeoJunction.to_csv(os.path.join(outFolder,'{0}_neojunction_TumorAndControl_check.txt'.format(taskName)),sep='\t',index=None)
-        print('NeoJunctions are ready\n')
-        
-    if mode=='TumorAndControl' and checkGTEx == 'False':
-        metaBaml = Meta(df) #Instantiate Meta object
-        print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_oldMethod_noGTEx(metaBaml.df)
-        dfNeoJunction.to_csv(os.path.join(outFolder,'{0}_neojunction_TumorAndControl.txt'.format(taskName)),sep='\t',index=None)
-        print('NeoJunctions are ready\n')
+
         
     if mode == 'singleSample' and checkGTEx == 'True':
+        global dicTissueExp
         print('loading GTEx dataset, it will take 20 mins, please be patient')
         start = process_time()
         with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
@@ -1253,7 +1683,9 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
         print('consume {0}'.format(end-start))
         metaBaml = Meta(df) #Instantiate Meta object
         print('generate NeoJunctions\n')
-        dfNeoJunction = neoJunction_testMethod_checkGTEx(metaBaml.df,dicTissueExp)
+        dfNeoJunction = check_GTEx(metaBaml.df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio)
+        if dfNeoJunction.shape[0] == 0:
+            raise Exception('After checking GTEx, no event remains')
         dfNeoJunction.to_csv(os.path.join(outFolder,'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t',index=None)
         print('NeoJunctions are ready\n')
         
@@ -1277,7 +1709,7 @@ def main(intFile,taskName,k,HLA,software,MHCmode,mode,Core=mp.cpu_count(),checkG
     pool.join()
     Crystal = pd.concat(df_out_list)   # default is stacking by rows
     
-    Crystal.to_csv(os.path.join(outFolder,'resultMHC/NeoJunction_{0}_mark.txt'.format(k)),sep='\t',header=True,index = False)
+    Crystal.to_csv(os.path.join(outFolder,'resultMHC/NeoJunction_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))
@@ -1287,7 +1719,7 @@ def usage():
 
 
     print('Usage:')
-    print('python3 mhcPresent.py -i /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events/Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt -t breast_all -o /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events -d /data/salomonis2/LabFiles/Frank-Li/python3/data -k 8 -H HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01 -s /data/salomonis2/LabFiles/Frank-Li/python3/netMHCpan-4.1/netMHCpan -M MHCI -m singleSample -C 8 -c False')
+    print('python3 mhcPresent.py -i /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events/Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt -t breast_all -o /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events -d /data/salomonis2/LabFiles/Frank-Li/python3/data -k 8 -H HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01 -s /data/salomonis2/LabFiles/Frank-Li/python3/netMHCpan-4.1/netMHCpan -M MHCI -m singleSample -C 8 -c False --cutoffPSI 0.1 --cutoffSample 0.1 --cutoffTissue 0.1')
     print('Options:')
     print('-i : path of input file')
     print('-t : the name of your task')
@@ -1300,8 +1732,9 @@ def usage():
     print('-m : mode for generating Neo-Junctions')
     print('-C : how many processes you wanna spawn')
     print('-c: check GTEx data or not')
-    print('--EventAnnotationFile: Oncosplice mode, path of EventAnnotation File')
-    print('--GroupsFile: Oncosplice mode, path of OncoSplice File')
+    print('--cutoffPSI : above this PSI value will be labelled as expressed')
+    print('--cutoffSample : above this ratio this tissue will be labelled as expressed')
+    print('--cutoffTissue : above this ratio this event will be labelled as expressed in normal tissue in general')
     print('-h --help : check help information ')
     print('Author: Guangyuan(Frank) Li <li2g2@mail.uc.edu>, PhD Student, University of Cincinnati, 2020') 
     
@@ -1315,7 +1748,7 @@ if __name__ == "__main__":
 #    sys.stderr = log_err
 #    sys.stdout = log_out
     try:
-        options, remainder = getopt.getopt(sys.argv[1:],'hi:t:o:d:k:H:s:M:m:C:c:',['help','EventAnnotationFile=','GroupsFile='])
+        options, remainder = getopt.getopt(sys.argv[1:],'hi:t:o:d:k:H:s:M:m:C:c:',['help','cutoffPSI=','cutoffSample=','cutoffTissue='])
     except getopt.GetoptError as err:
         print('ERROR:', err)
         usage()
@@ -1354,18 +1787,21 @@ if __name__ == "__main__":
         elif opt in ('-c'):
             checkGTEx = arg
             print('check GTEx or not:',arg)
-        elif opt in ('--EventAnnotationFile'):
-            EventAnnotationFile = arg
-            print('Oncosplice mode, you have to specify full path of EventAnnotation:',arg)
-        elif opt in ('--GroupsFile'):
-            GroupsFile = arg
-            print('Oncosplice mode, you have to specify full path of GroupsFile:',arg)
+        elif opt in ('--cutoffPSI'):
+            cutoff_PSI = float(arg)
+            print('cutoff for PSI value:',arg)
+        elif opt in ('--cutoffSample'):
+            cutoff_sample = float(arg)
+            print('cutoff for sample ratio:',arg)    
+        elif opt in ('--cutoffTissue'):
+            cutoff_tissue = float(arg)
+            print('cutoff for tissue ratio:',arg) 
         elif opt in ('--help','-h'):
             usage() 
             sys.exit() 
 
 
-    main(intFile,taskName,k,HLA,software,MHCmode,mode,Core,checkGTEx,EventAnnotationFile='dummy.txt',GroupsFile='proxy.txt')
+    main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,checkGTEx,cutoff_PSI,cutoff_sample,cutoff_tissue)
 
     
     

@@ -1,11 +1,13 @@
 @media screen {
     div.summary {
       width: 18em;
+      height: 100vh;
       position:fixed;
       top: 3em;
       margin:1em 0 0 1em;
-      overflow: scroll;
-    }
+      overflow-x: auto;
+      overflow-y: auto;
+  }
     
     div.main {
       display:block;

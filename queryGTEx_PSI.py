@@ -11,13 +11,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from yattag import Doc
+import h5py
+import subprocess
 
-def scratchPlusView1():     # directly use pool for multiprocessing
+def scratchPlusView1(dataFolder,outFolder):     # directly use pool for multiprocessing
 
     global dicSRA
 
-    sraTable = pd.read_csv('./data/GTEx_SRARunTable.txt',sep='\t')
-    sraData = pd.read_csv('./data/GTEx_EventAnnotation.txt',sep='\t')
+    sraTable = pd.read_csv(os.path.join(dataFolder,'GTEx_SRARunTable.txt'),sep='\t')
+    sraData = pd.read_csv(os.path.join(dataFolder,'GTEx_EventAnnotation.txt'),sep='\t')
     
     conversion = sraTable[['Run','body_site']]   # this is a complete table
     
@@ -84,12 +86,21 @@ def scratchPlusView1():     # directly use pool for multiprocessing
         return result
     
     dicTissueExp = merge_dicts(dicts)
-    import bz2
-    import _pickle as cpickle
-    import pickle
-    with bz2.BZ2File('./data/dicTissueExp.pbz2','wb') as f1:
-        cpickle.dump(dicTissueExp,f1)
+
+    with h5py.File(os.path.join(outFolder,'dicTissueExp.hdf5'),'w') as f:
+        for event,tissueExp in dicTissueExp.items():
+            grp = f.create_group(event)   # /event when grp.name   # i think grp is a group object
+            for tissue,expression in tissueExp.items():
+                grp.create_dataset(tissue,data=expression)    # /event/tissue  # data has to be a ndarray, not an object
+
     return dicTissueExp
+
+    # import bz2
+    # import _pickle as cpickle
+    # import pickle
+    # with bz2.BZ2File('./data/dicTissueExp.pbz2','wb') as f1:
+    #     cpickle.dump(dicTissueExp,f1)
+    # return dicTissueExp
 
 def constructDic(sraData):
 
@@ -98,11 +109,28 @@ def constructDic(sraData):
         print('this is the {0}th run of process{1}'.format(i,os.getpid()))
         event = sraData['UID'].tolist()[i].split('|')[0]
         for tissue,accID in dicSRA.items():
-            try: dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values  # here PSI value will be stored as ndarray
+            try: dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values.tolist()  # here PSI value will be stored as ndarray
             except KeyError:            
                 dicTissueExp[event] = {}
-                dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
+                dicTissueExp[event][tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values.tolist()
     return dicTissueExp
+
+# def constructHDF5(sraData):
+
+#     with h5py.File('dicTissueExp.hdf5','w') as f:
+#         for i in range(sraData.shape[0]):
+#             print('this is the {0}th run of process{1}'.format(i,os.getpid()))
+#             event = sraData['UID'].tolist()[i].split('|')[0]
+#             dic = {}
+#             for tissue,accID in dicSRA.items():
+#                 try: dic[tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values  # here PSI value will be stored as ndarray
+#                 except KeyError:            
+#                     dic[tissue] = {}
+#                     dic[tissue] = sraData.iloc[i][[accID+'_1.bed' for accID in dicSRA[tissue]]].values
+#                 f.create_dataset(event,data=dic)
+
+
+
     
 
 
@@ -120,6 +148,7 @@ def loadPlusView():
     return dicTissueExp
 
 
+
 def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
     flag=0
     import warnings
@@ -135,6 +164,7 @@ def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
         else:
 
             for tis,exp in tissueExp.items():
+                exp = np.array(exp)   # turn to ndarray, and dtype is object
                 exp = exp.astype('float64')
                 
                 exp[np.isnan(exp)] = 0.0   # because nan just means they don't even have expression
@@ -155,8 +185,8 @@ def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
                         plt.xlabel('GTEx Samples')
                         plt.ylabel('PSI value')
                         plt.legend()
-                        if not os.path.exists('./GTEx'): os.makedirs('./GTEx')
-                        plt.savefig('./GTEx/{0}.svg'.format(tis),bbox_inches='tight')
+                        if not os.path.exists(os.path.join(outFolder,'GTEx')): os.makedirs(os.path.join(outFolder,'GTEx'))
+                        plt.savefig(os.path.join(outFolder,'GTEx/{0}.svg').format(tis),bbox_inches='tight')
                         plt.close(fig)
                     else: continue
                 else: 
@@ -192,8 +222,52 @@ def inspectGTEx(dicTissueExp,event,cutoff,tissue,plot):
     return tissueList,summary
 
 
+def inspectGTExHDF5(event,cutoff,tissue,plot):
+    flag=0
+    import warnings
+    warnings.filterwarnings("ignore")
 
+    if tissue=='all':
+        tissueList = []
+        summary = []
+        with h5py.File(os.path.join(dataFolder,'dicTissueExp.hdf5'),'r') as f:
+            try:
+                tissueExp = f[event]   # tissueExp is a group object
+            except:
+                summary.append('Don\'t detect expression of {0} in normal tissue'.format(event))
+            else:
 
+                for tis,exp in tissueExp.items():   # group object will have items method
+                    exp = np.array(exp)   # turn to ndarray, and dtype is object
+                    exp = exp.astype('float64')
+                    
+                    exp[np.isnan(exp)] = 0.0   # because nan just means they don't even have expression
+
+                    if exp.size == 0: print('{0} data incomplete'.format(tis))
+                    elif np.any(exp):   # have non-zero element
+                        tissueList.append(tis)
+                        hits = sum([True if item > cutoff else False for item in exp]) # how many samples has PSI > 0.1
+                        size = exp.size   # how many samples in total
+
+                        out = '{0}:({1}/{2}) has PSI > {3}'.format(tis,hits,size,cutoff)
+                        summary.append(out)
+                        
+                        if plot=='True':
+                            fig = plt.figure()
+                            plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
+                            plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
+                            plt.xlabel('GTEx Samples')
+                            plt.ylabel('PSI value')
+                            plt.legend()
+                            if not os.path.exists(os.path.join(outFolder,'GTEx')): os.makedirs(os.path.join(outFolder,'GTEx'))
+                            plt.savefig(os.path.join(outFolder,'GTEx/{0}.svg').format(tis),bbox_inches='tight')
+                            plt.close(fig)
+                        else: continue
+                    else: 
+                        flag += 1
+                        summary.append('No expression in {}'.format(tis))
+                summary.append('{0} has no expression in {1} tissue types'.format(event,flag))
+    return tissueList,summary
 
 
 # html generator
@@ -264,7 +338,7 @@ def display_all(tissueList,event,summary,cutoff):
     with tag('html'):
         with tag('head'):
             line('title','{}_report_PSI'.format(event))
-            doc.stag('link',rel='stylesheet',type='text/css',href='stype.css')
+            doc.stag('link',rel='stylesheet',type='text/css',href='style.css')
         with tag('body'):
             doc.asis(display_header(event))
             doc.asis(display_summary(tissueList))
@@ -273,7 +347,7 @@ def display_all(tissueList,event,summary,cutoff):
     return doc.getvalue()
 
 def html_generator(tissueList,event,summary,cutoff):
-    with open('test.html','w') as f1:
+    with open(os.path.join(outFolder,'test.html'),'w') as f1:
         f1.write(display_all(tissueList,event,summary,cutoff))
   
 
@@ -281,35 +355,36 @@ def usage():
 
 
     print('Usage:')
-    print('python3 queryGTEx_PSI.py -e KYAT3:ENSG00000137944:E4.1-I4.1_88965413 -c 0.1 -m savage -t all -p True')
+    print('python3 queryGTEx_PSI.py -e KYAT3:ENSG00000137944:E4.1-I4.1_88965413 -c 0.1 -m savage -t all -p True -d /data/salomonis2/LabFiles/Frank-Li/python3/data -o /data/salomonis2/LabFiles/Frank-Li/GTEx_Viewer')
     print('Options:')
     print('-e --event : Splicing event you want to interrogate')
     print('-c --cutoff : cutoff value for PSI')
     print('-m --mode : load off-the-shelf GTEx data or generating it from scratch')
     print('-t --tissue : tissue-specific abundance you want to inspect')
     print('-p --plot : Do you want to plot all tissue-specific expression bar charts?')
+    print('-d : data folder path')
+    print('-o : output folder path')
     print('-h --help : check help information ')
     print('Author: Guangyuan(Frank) Li <li2g2@mail.uc.edu>, PhD Student, University of Cincinnati, 2020') 
 
-def main(event,mode,cutoff,tissue,plot):
+def main(event,mode,cutoff,tissue,plot,dataFolder,outFolder):
     if mode == 'denovo':
-        dicTissueExp = scratchPlusView1()
+        dicTissueExp = scratchPlusView1(dataFolder,outFolder)
+        tissueList,summary = inspectGTEx(dicTissueExp,event,cutoff,tissue,plot)
+        html_generator(tissueList,event,summary,cutoff)
     if mode == 'savage':
-        print('Please wait for around 10 min to load the GTEx Data')
-        dicTissueExp = loadPlusView()
-    tissueList,summary = inspectGTEx(dicTissueExp,event,cutoff,tissue,plot)
-    html_generator(tissueList,event,summary,cutoff)
+        print('Loding GTEx pre-processed hdf5 file')
+        tissueList,summary = inspectGTExHDF5(event,cutoff,tissue,plot)
+        html_generator(tissueList,event,summary,cutoff)
+    if not os.path.exists(os.path.join(outFolder,'style.css')): subprocess.run(['cp',os.path.join(dataFolder,'style.css'),outFolder])
+
 
 
 if __name__ == '__main__':
     import getopt
     import sys
-#    log_err = open('queryGTEx.stderr.log','a')
-    #log_out = open('queryGTEx.stdout.log','a')
-#    sys.stderr = log_err
-    #sys.stdout = log_out
     try:
-        options, remainder = getopt.getopt(sys.argv[1:],'he:c:m:t:p:',['help','event=','cutoff=','mode=','tissue=','plot='])
+        options, remainder = getopt.getopt(sys.argv[1:],'he:c:m:t:p:d:o:',['help','event=','cutoff=','mode=','tissue=','plot='])
     except getopt.GetoptError as err:
         print('ERROR:', err)
         usage()
@@ -330,10 +405,16 @@ if __name__ == '__main__':
         elif opt in ('-p','--plot'):
             plot = arg
             print('Generating plot or not:',arg)
+        elif opt in ('-d'):
+            dataFolder = arg
+            print('data folder is:',arg)   
+        elif opt in ('-o'):
+            outFolder = arg
+            print('output folder is:',arg)         
         elif opt in ('--help','-h'):
             usage() 
             sys.exit()       
-    main(event,mode,cutoff,tissue,plot)
+    main(event,mode,cutoff,tissue,plot,dataFolder,outFolder)
     
     
 

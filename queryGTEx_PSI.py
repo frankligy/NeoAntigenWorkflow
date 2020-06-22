@@ -394,6 +394,7 @@ if __name__ == '__main__':
             event = arg
             print('Queried examined splicing event:', arg)
         elif opt in ('-c','--cutoff'):
+            #print(arg)
             cutoff = float(arg)
             print('cutoff value is:', arg)
         elif opt in ('-m','--mode'):

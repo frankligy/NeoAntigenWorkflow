@@ -20,7 +20,7 @@ import bz2
 import _pickle as cpickle
 import pickle
 import re
-from time import process_time
+from time import process_time,sleep
 from urllib.error import HTTPError
 import requests
 import xmltodict
@@ -29,6 +29,7 @@ import subprocess
 from pathos.multiprocessing import ProcessingPool as Pool
 import getopt
 from decimal import Decimal as D
+
 
 
 
@@ -98,23 +99,30 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
         Caveat:
         because of the overlapping issue in exonCoordinates, the resultant junction sequence, its both terminus might have one overhang
         '''
-        exam_seq,back_seq = [],[]
+        exam_seq = []
+        cond = []
         for i in range(self.df.shape[0]):
             temp = uid(self.df,i)
             EnsID = list(temp.keys())[0].split(':')[1]
             exam_site = list(temp.values())[0][0]
-            back_site = list(temp.values())[0][1]
+            # back_site = list(temp.values())[0][1]
             exam_site_1 = subexon_tran(exam_site.split('-')[0],EnsID,dict_exonCoords,dict_fa,'site1')
             exam_site_2 = subexon_tran(exam_site.split('-')[1],EnsID,dict_exonCoords,dict_fa,'site2')
             exam_seq_join = ','.join([exam_site_1,exam_site_2])
+            if '*' in exam_seq_join: cond.append(False)
+            else: cond.append(True)
             exam_seq.append(exam_seq_join)
-            back_site_1 = subexon_tran(back_site.split('-')[0],EnsID,dict_exonCoords,dict_fa,'site1')
-            back_site_2 = subexon_tran(back_site.split('-')[1],EnsID,dict_exonCoords,dict_fa,'site2')
-            back_seq_join = ','.join([back_site_1,back_site_2])
-            back_seq.append(back_seq_join)
+            # back_site_1 = subexon_tran(back_site.split('-')[0],EnsID,dict_exonCoords,dict_fa,'site1')
+            # back_site_2 = subexon_tran(back_site.split('-')[1],EnsID,dict_exonCoords,dict_fa,'site2')
+            # back_seq_join = ','.join([back_site_1,back_site_2])
+            # back_seq.append(back_seq_join)
             
         self.df['exam_seq'] = exam_seq
         #self.df['back_seq'] = back_seq
+        self.df['cond'] = cond
+        self.df = self.df[self.df['cond']]
+        self.df.drop(columns=['cond'])
+
         
     def matchWithExonlist(self,df_exonlist,dict_exonCoords):
         col1,col2 = [],[]        
@@ -498,7 +506,11 @@ def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonLis
                 coords_query = dict_exonCoords[EnsID][exam2] 
                 #print(coords_query)
                 strand_query = coords_query[1]
-                judge_query = dict_judge[exam2]
+                try:
+                    judge_query = dict_judge[exam2]
+                except KeyError:
+                    print(dict_judge,exam2,EnsID,query,tran,file=sys.stderr)
+                    raise Exception('check aboved')
                 end = int(coords_query[3])
                 
                 
@@ -683,7 +695,7 @@ class NeoJ(Meta):
                                 peptide = '*'
                                 phaseArray.append(phase)
                                 peptideArray.append(phase)
-                                print('The {}th transcript of {}, even though junction site could match with, but optimal ORF suggests that junction site will not be translated'.format(j,list(self.df['UID'])[i]))
+                                #print('The {}th transcript of {}, even though junction site could match with, but optimal ORF suggests that junction site will not be translated'.format(j,list(self.df['UID'])[i]))
                             else: 
                                 former = junctionOri.find(',')  # length of former part, also the index of splicesite
                                 phase = abs(startJun + former - startORF) % 3  
@@ -797,7 +809,7 @@ class NeoJ(Meta):
             if merList == ['MANNUAL']: merList = self.df['mannual'].tolist()[i]
             #print(merList)
             netMHCpan.pepFile(merList) # get query.pep file
-            machine = netMHCpan(os.path.join(outFolder,'resultMHC','temp','query{}.pep'.format(os.getpid())),HLA,pathSoftWare,self.mer,mode,sb,wb)
+            machine = netMHCpan(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','query{}.pep'.format(os.getpid())),HLA,pathSoftWare,self.mer,mode,sb,wb)
             dic = machine.seperator()
 
             col.append(dic)
@@ -822,7 +834,7 @@ class netMHCpan():
         [result.extend(item) for item in lis if isinstance(item,list)]
         result = list(set(result))
 
-        with open(os.path.join(outFolder,'resultMHC','temp','query{}.pep'.format(os.getpid())),'w') as f1:
+        with open(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','query{}.pep'.format(os.getpid())),'w') as f1:
             [f1.write('{}\n'.format(mer)) for mer in result]
         # now we have query.pep file
     
@@ -839,22 +851,22 @@ class netMHCpan():
 
     
     def runSoftWareI(self):
-        with open(os.path.join(outFolder,'resultMHC','temp','resultI{}.pep'.format(os.getpid())),'w') as f3:
+        with open(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultI{}.txt'.format(os.getpid())),'w') as f3:
             subprocess.run([self.pathSoftWare,'-p',self.intFile, '-BA','-a',self.HLA,'-rth', str(self.sb), '-rlt', str(self.wb), '-l',str(self.length),'-t',str(self.wb)],stdout=f3)        
        # will generate a result file  
     
     def runSoftWareII(self):
-        with open(os.path.join(outFolder,'resultMHC','temp','resultII{}.pep'.format(os.getpid())),'w') as f4:
+        with open(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultII{}.txt'.format(os.getpid())),'w') as f4:
             subprocess.run([self.pathSoftWare,'-f',self.intFile,'-inptype', '1', '-a',self.HLA,'-length',str(self.length)],stdout=f4)
     
     def postFileII(self):
-        with open(os.path.join(outFolder,'resultMHC','temp','resultII{}.pep'.format(os.getpid())),'r') as f5,open(os.path.join(outFolder,'resultMHC','temp','resultII_parse{}.pep'.format(os.getpid())),'w') as f6:
+        with open(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultII{}.txt'.format(os.getpid())),'r') as f5,open(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultII_parse{}.txt'.format(os.getpid())),'w') as f6:
             for line in f5:
                 if line.startswith('#') or line.startswith('-') or line.strip('\n') == '':continue
                 elif re.search(r'^\w+',line): continue
                 elif re.search(r'Pos',line): continue
                 else: f6.write(line)
-        try:df=pd.read_csv(os.path.join(outFolder,'resultMHC','temp','resultII_parse{}.pep'.format(os.getpid())),sep='\s+',header=None,index_col=0,names=[str(i+1) for i in range(11)])
+        try:df=pd.read_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultII_parse{}.txt'.format(os.getpid())),sep='\s+',header=None,index_col=0,names=[str(i+1) for i in range(11)])
         except pd.errors.EmptyDataError: dic = 'No candidates'
         else:
             hlaAllele = df['2'].tolist()  # HLA Allele
@@ -879,13 +891,13 @@ class netMHCpan():
     
     def postFileI(self):
         # HLA = 'HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01'
-        with open(os.path.join(outFolder,'resultMHC','temp','resultI{}.pep'.format(os.getpid())),'r') as f1, open(os.path.join(outFolder,'resultMHC','temp','resultI_parse{}.pep'.format(os.getpid())),'w') as f2:
+        with open(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultI{}.txt'.format(os.getpid())),'r') as f1, open(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultI_parse{}.txt'.format(os.getpid())),'w') as f2:
             for line in f1:
                 if line.startswith('#') or line.startswith('-') or line.strip('\n') == '': continue
                 elif re.search(r'^\w+',line): continue
                 elif re.search(r'Pos',line): continue
                 else: f2.write(line)
-        try:df = pd.read_csv(os.path.join(outFolder,'resultMHC','temp','resultI_parse{}.pep'.format(os.getpid())),sep='\s+', header=None,index_col=0)  
+        try:df = pd.read_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','resultI_parse{}.txt'.format(os.getpid())),sep='\s+', header=None,index_col=0)  
         except pd.errors.EmptyDataError: dic = 'No candidates'   
         else:
             hlaAllele = df[1].tolist()  # HLA Allele
@@ -1288,7 +1300,7 @@ def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
         try:
             tissueExp = dicTissueExp[event]  # {heart:[],brain:[]}   # values are ndarray
         except KeyError:
-            cond = True
+            cond = False
             col.append(cond)
         else:
             tissueCounter = 0
@@ -1365,7 +1377,7 @@ def subexon_tran(subexon,EnsID,dict_exonCoords,dict_fa,flag): # flag means if it
                 try:
                     attrs = dict_exonCoords[EnsID][subexon]
                 except KeyError:
-                    print('{0} observes an UTR event {1}'.format(EnsID,subexon))
+                    #print('{0} observes an UTR event {1}'.format(EnsID,subexon))
                     chrUTR,strandUTR = utrAttrs(EnsID,dict_exonCoords)
 
                     exon_seq = utrJunction(suffix,EnsID,strandUTR,chrUTR,flag)  
@@ -1503,72 +1515,102 @@ def intron(event,EnsGID,junction,dict_exonCoords,dictExonList,N):
         former = event.split('-')[0]  # E2.4, E22.1
         latter = event.split('-')[1]   # I2.1
         #print(event,EnsGID,former)
-        try: attrs_former = dict_exonCoords[EnsGID][former] # chr, strand, start, end
-        except KeyError: print('preexisting bug, Event {0} in {1} doesn\'t have {2}!!!!!'.format(event,EnsGID,former))
-        else:
-            attrs_latter = dict_exonCoords[EnsGID][latter]
-            strand = attrs_latter[1]        
-            allTransDict = dictExonList[EnsGID] 
-            for tran,exonlist in allTransDict.items():
-                if former in exonlist: 
-                    try:tranStartIndex = grabEnsemblTranscriptTable(tran)
-                    except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
-                    else:
-                        if type(tranStartIndex) == int:
-                            if strand == '+':
-                                intronStartIndex = int(attrs_latter[2])   # index by intron itself
-                                remainder = (intronStartIndex - tranStartIndex) % 3   # how many nts remaining before the first nt in intron
-                                # if 0, means the first nt in intron will be the first nt in codon triplet,
-                                # if 1, means the first nt in intron will be the second nt in codon triplet,
-                                # if 2, means the first nt in intron will be the third nt in codon triplet.
-                                if remainder == 0: 
-                                    front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                                    junctionSlice = junction[front:].replace(',','')
-                                elif remainder == 1: 
-                                    front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                                    junctionSlice = junction[front:].replace(',','')
-                                elif remainder == 2: 
-                                    front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                                    junctionSlice = junction[front:].replace(',','')
-                            elif strand == '-':
-                                intronStartIndex = int(attrs_latter[3]) 
-                                remainder = (tranStartIndex - intronStartIndex) % 3 
-                                if remainder == 0: 
-                                    front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
-                                    junctionSlice = junction[front:].replace(',','')
-                                elif remainder == 1: 
-                                    front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
-                                    junctionSlice = junction[front:].replace(',','')
-                                elif remainder == 2: 
-                                    front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
-                                    junctionSlice = junction[front:].replace(',','')
-                    
-                            try:peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
-                            except:print('**** preexising bugs')
-                            else:
-                                merArray = extractNmer(peptide,N) 
-                                merBucket.append(merArray)
+        #try: attrs_former = dict_exonCoords[EnsGID][former] # chr, strand, start, end
+        #except KeyError: print('preexisting bug, Event {0} in {1} doesn\'t have {2}!!!!!'.format(event,EnsGID,former))
+        #else:
+        attrs_latter = dict_exonCoords[EnsGID][latter]
+        strand = attrs_latter[1]        
+        allTransDict = dictExonList[EnsGID] 
+        for tran,exonlist in allTransDict.items():
+            if former in exonlist: 
+                try:tranStartIndex = grabEnsemblTranscriptTable(tran)
+                except HTTPError: continue   # for instance, BC4389439 it is not a Ensemble-valid transcript ID, just pass this transcript
+                else:
+                    if type(tranStartIndex) == int:
+                        if strand == '+':
+                            intronStartIndex = int(attrs_latter[2])   # index by intron itself
+                            remainder = (intronStartIndex - tranStartIndex) % 3   # how many nts remaining before the first nt in intron
+                            # if 0, means the first nt in intron will be the first nt in codon triplet,
+                            # if 1, means the first nt in intron will be the second nt in codon triplet,
+                            # if 2, means the first nt in intron will be the third nt in codon triplet.
+                            if remainder == 0: 
+                                front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:].replace(',','')
+                            elif remainder == 1: 
+                                front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[front:].replace(',','')
+                        elif strand == '-':
+                            intronStartIndex = int(attrs_latter[3]) 
+                            remainder = (tranStartIndex - intronStartIndex) % 3 
+                            if remainder == 0: 
+                                front=0 if junction.find(',') - ((N-1)*3)<0 else junction.find(',') - ((N-1)*3)
+                                junctionSlice = junction[front:].replace(',','')
+                            elif remainder == 1: 
+                                front=0 if junction.find(',') - ((N-1)*3+1)<0 else junction.find(',') - ((N-1)*3+1)
+                                junctionSlice = junction[front:].replace(',','')
+                            elif remainder == 2: 
+                                front=0 if junction.find(',') - ((N-1)*3+2)<0 else junction.find(',') - ((N-1)*3+2)
+                                junctionSlice = junction[front:].replace(',','')
+                
+                        try:peptide = str(Seq(junctionSlice,generic_dna).translate(to_stop=False))
+                        except:print('**** preexising bugs')
+                        else:
+                            merArray = extractNmer(peptide,N) 
+                            merBucket.append(merArray)
         if merBucket == []: merBucket = [[]]  # means no match for the former subexon.
         
     elif event.startswith('I'): merBucket = [[]]
     return merBucket
 
 
-# https://rest.ensembl.org/documentation/info/lookup
-def grabEnsemblTranscriptTable(EnsTID):
-    global counter
-    print(EnsTID,'**********************************************************')
-    server = "https://rest.ensembl.org"
-    ext = "/lookup/id/{0}?expand=1".format(EnsTID)     
-    r = requests.get(server+ext, headers={ "Content-Type" : "application/json"})     
-    try: decoded = r.json()
-    except: 
-        print('JSON unknoen error')
-    else:
-        try: translationStartIndex = decoded['Translation']['start']
-        except KeyError: print('{0} is not translatable'.format(EnsTID)) # might be invalid transcriptID or they don't have tranStartIndex(don't encode protein)
-        else: return translationStartIndex
-# for except branch, we don't specify return command, so it will return NoneType   
+# # https://rest.ensembl.org/documentation/info/lookup
+# def grabEnsemblTranscriptTable(EnsTID):
+#     print(EnsTID,'**********************************************************')
+#     server = "https://rest.ensembl.org"
+#     ext = "/lookup/id/{0}?expand=1".format(EnsTID)     
+#     r = requests.get(server+ext, headers={ "Content-Type" : "application/json"})     
+#     try: decoded = r.json()
+#     except: 
+#         sleep(1)   # if not able to grab information, may be rate limited by Ensembl API, 15 times/second, sleep 1s, then retry
+#         try:decoded = r.json()
+#         except:
+#             print('JSON unknown error')
+#         else:
+#             try: translationStartIndex = decoded['Translation']['start']
+#             except KeyError: print('{0} is not translatable'.format(EnsTID)) # might be invalid transcriptID or they don't have tranStartIndex(don't encode protein)
+#             else: return translationStartIndex
+
+#     else:
+#         try: translationStartIndex = decoded['Translation']['start']
+#         except KeyError: print('{0} is not translatable'.format(EnsTID)) # might be invalid transcriptID or they don't have tranStartIndex(don't encode protein)
+#         else: return translationStartIndex
+# # for except branch, we don't specify return command, so it will return NoneType   
+
+
+def dictGTFconstruct(dataFolder):
+    dictGTF = {}
+    gtfEnsembl91 = pd.read_csv(os.path.join(dataFolder,'gtfEnsembl91.txt'),sep='\t')
+    for i in range(gtfEnsembl91.shape[0]):
+        feature = gtfEnsembl91.iloc[i]['feature']
+        start = gtfEnsembl91.iloc[i]['start']
+        tranID = gtfEnsembl91.iloc[i]['tranID']
+        if feature == 'start_codon':
+            dictGTF[tranID] = start
+    return dictGTF
+
+
+    
+def grabEnsemblTranscriptTable(EnsTID):   # replace old grabEnsemblTranscriptTable function with a pre-downloaded dataset
+    try:
+        translationStartIndex = dictGTF[EnsTID]
+    except KeyError:
+        print('{0} does not have valid EnsTID'.format(EnsTID))
+    else: return translationStartIndex
+
+
 
 def toFasta(list_,N):
     with open('./resultMHC/queryNetMHC_{0}.fa'.format(N),'w') as file1:
@@ -1590,7 +1632,7 @@ def inspectGTEx(event,dicTissueExp,tissue='all',plot=True):
                     plt.bar(np.arange(len(exp)),exp,width=0.2,label=tis)
                     plt.xticks(np.arange(len(exp)),np.arange(len(exp))+1)
                     plt.legend()
-                    plt.savefig(os.path.join(outFolder,'resultMHC','figures/{0}_{1}.pdf'.format(event,tis)),bbox_inches='tight')
+                    plt.savefig(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures/{0}_{1}.pdf'.format(event,tis)),bbox_inches='tight')
                     plt.close(fig)
                 else: continue
             else: 
@@ -1605,7 +1647,7 @@ def inspectGTEx(event,dicTissueExp,tissue='all',plot=True):
         elif np.any(exp):   # have non-zero element
             plt.bar(np.arange(len(exp)),exp,width=0.2,label='tissue')
             plt.legend()
-            plt.savefig(os.path.join(outFolder,'resultMHC','figures/{}.pdf'.format(tissue)),bbox_inches='tight')
+            plt.savefig(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures/{}.pdf'.format(tissue)),bbox_inches='tight')
             plt.show()
             print(expression)
     return flag  
@@ -1655,9 +1697,10 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     global dict_exonCoords
     global dict_fa
     global dictExonList
-    if not os.path.exists(os.path.join(outFolder,'resultMHC')): os.makedirs(os.path.join(outFolder,'resultMHC'))
-    if not os.path.exists(os.path.join(outFolder,'resultMHC','temp')): os.makedirs(os.path.join(outFolder,'resultMHC','temp'))
-    if not os.path.exists(os.path.join(outFolder,'resultMHC','figures')): os.makedirs(os.path.join(outFolder,'resultMHC','figures'))
+    global dictGTF
+    if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName))): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName)))
+    if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp')): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp'))
+    if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures')): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures'))
     print('loading input files\n')
     df = pd.read_csv(intFile,sep='\t') 
     print('loading all existing transcripts files\n')
@@ -1668,26 +1711,32 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     dict_fa = fasta_to_dict(os.path.join(dataFolder,'Hs_gene-seq-2000_flank.fa'))
     print('converting subexon coordinates to a dictionary\n')
     dictExonList = convertExonList(df_exonlist)
+    print('constructing dictGTF file')
+    dictGTF = dictGTFconstruct(dataFolder)
 
 
     
 
         
     if mode == 'singleSample' and checkGTEx == 'True':
-        global dicTissueExp
-        print('loading GTEx dataset, it will take 20 mins, please be patient')
-        start = process_time()
-        with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp2.pbz2'),'rb') as f1:
-            dicTissueExp = cpickle.load(f1)  
-            end = process_time()    
-        print('consume {0}'.format(end-start))
-        metaBaml = Meta(df) #Instantiate Meta object
-        print('generate NeoJunctions\n')
-        dfNeoJunction = check_GTEx(metaBaml.df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio)
-        if dfNeoJunction.shape[0] == 0:
-            raise Exception('After checking GTEx, no event remains')
-        dfNeoJunction.to_csv(os.path.join(outFolder,'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t',index=None)
-        print('NeoJunctions are ready\n')
+        if os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName))):
+            dfNeoJunction = pd.read_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t')
+            print('NeoJunctions are ready\n')
+        else:
+            global dicTissueExp
+            print('loading GTEx dataset, it will take 20 mins, please be patient')
+            start = process_time()
+            with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp.pbz2'),'rb') as f1:
+                dicTissueExp = cpickle.load(f1)  
+                end = process_time()    
+            print('consume {0}'.format(end-start))
+            metaBaml = Meta(df) #Instantiate Meta object
+            print('generate NeoJunctions\n')
+            dfNeoJunction = check_GTEx(metaBaml.df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio)
+            if dfNeoJunction.shape[0] == 0:
+                raise Exception('After checking GTEx, no event remains')
+            dfNeoJunction.to_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t',index=None)
+            print('NeoJunctions are ready\n')
         
     if mode == 'singleSample' and checkGTEx == 'False':
         metaBaml = Meta(df) #Instantiate Meta object
@@ -1709,7 +1758,7 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     pool.join()
     Crystal = pd.concat(df_out_list)   # default is stacking by rows
     
-    Crystal.to_csv(os.path.join(outFolder,'resultMHC/NeoJunction_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
+    Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/NeoJunction_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))

@@ -1656,40 +1656,14 @@ def inspectGTEx(event,dicTissueExp,tissue='all',plot=True):
 def run(NeoJBaml):
     PID = os.getpid()
 
-    print('retrieve all junction site sequence-Process:{0}\n'.format(PID))
-    NeoJBaml.retrieveJunctionSite(dict_exonCoords,dict_fa)
- 
-    print('inspecting each event see if they could match up with any existing transcripts-Process:{0}\n'.format(PID))
-    NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
-    NeoJBaml.rescueEvent_1()
-    NeoJBaml.rescueEvent_2()
- 
-    print('getting most likely ORF and ORFaa for each event that could match up with existing transcript-Process:{0}\n'.format(PID))
-    NeoJBaml.getORF()
-    NeoJBaml.getORFaa()
 
-    print('checking the phase of each event\'s junction site-Process:{0}\n'.format(PID))
-    NeoJBaml.phaseTranslateJunction()
-
-    print('getting Nmer, only for first round-Process:{0}\n'.format(PID))
-    NeoJBaml.getNmer()
-
-    print('first round ends-Process:{0}\n'.format(PID))
-
-    print('starting to mannal check,second round-Process:{0}\n'.format(PID))
-    NeoJBaml.mannual()
-    print('finished mannual check-Process:{0}\n'.format(PID))
-
-    if mode == 'Neoantigen':
-        print('starting to deploy netMHCpan-Process:{0}\n'.format(PID))
-        if MHCmode == 'MHCI':
-            NeoJBaml.netMHCresult(HLA,software,MHCmode)
-        elif MHCmode == 'MHCII':
-            NeoJBaml.netMHCresult(HLA,software,MHCmode) 
-        print('finished binding affinity prediction-Process:{0}\n'.format(PID))
-        return NeoJBaml.df
-    elif mode == 'Peptide':
-        return NeoJBaml.df   # only get splicing junction peptides
+    print('starting to deploy netMHCpan-Process:{0}\n'.format(PID))
+    if MHCmode == 'MHCI':
+        NeoJBaml.netMHCresult(HLA,software,MHCmode)
+    elif MHCmode == 'MHCII':
+        NeoJBaml.netMHCresult(HLA,software,MHCmode) 
+    print('finished binding affinity prediction-Process:{0}\n'.format(PID))
+    return NeoJBaml.df
 
 
 def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,checkGTEx,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
@@ -1721,7 +1695,7 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     
 
         
-    if checkGTEx == 'True':
+    if mode == 'singleSample' and checkGTEx == 'True':
         if os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName))):
             dfNeoJunction = pd.read_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t')
             print('NeoJunctions are ready\n')
@@ -1741,49 +1715,69 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
             dfNeoJunction.to_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t',index=None)
             print('NeoJunctions are ready\n')
         
-    if checkGTEx == 'False':
+    if mode == 'singleSample' and checkGTEx == 'False':
         metaBaml = Meta(df) #Instantiate Meta object
         print('generate NeoJunctions\n')
         dfNeoJunction = neoJunction_testMethod_noGTEx(metaBaml.df)
         print('NeoJunctions are ready\n')
+
+    PID = os.getpid()
+
+    NeoJBaml = NeoJ(dfNeoJunction,k)
+    print('retrieve all junction site sequence-Process:{0}\n'.format(PID))
+    NeoJBaml.retrieveJunctionSite(dict_exonCoords,dict_fa)
+
+    print('inspecting each event see if they could match up with any existing transcripts-Process:{0}\n'.format(PID))
+    NeoJBaml.matchWithExonlist(df_exonlist,dict_exonCoords)
+    NeoJBaml.rescueEvent_1()
+    NeoJBaml.rescueEvent_2()
+
+    print('getting most likely ORF and ORFaa for each event that could match up with existing transcript-Process:{0}\n'.format(PID))
+    NeoJBaml.getORF()
+    NeoJBaml.getORFaa()
+
+    print('checking the phase of each event\'s junction site-Process:{0}\n'.format(PID))
+    NeoJBaml.phaseTranslateJunction()
+
+    print('getting Nmer, only for first round-Process:{0}\n'.format(PID))
+    NeoJBaml.getNmer()
+
+    print('first round ends-Process:{0}\n'.format(PID))
+
+    print('starting to mannal check,second round-Process:{0}\n'.format(PID))
+    NeoJBaml.mannual()
+    print('finished mannual check-Process:{0}\n'.format(PID))
+
+    dataframe = NeoJBaml.df
+    dataframe.to_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'splicingJunctionPeptides.txt'),sep='\t',index=None)
+
+    
        
-    print('start analysis and spawn subprocesses\n')
+    print('start deploy netMHCpan and spawn subprocesses\n')
 
 
 
 
-    df_split = np.array_split(dfNeoJunction, Core, axis=0)    # cut by rows, equally splited 
+    df_split = np.array_split(dataframe, Core, axis=0)    # cut by rows, equally splited 
     obj_split = [NeoJ(df,k) for df in df_split]
     print('start pooling\n')
-
     pool = Pool(Core)
     df_out_list = pool.map(run, obj_split)
     pool.close()
     pool.join()
     Crystal = pd.concat(df_out_list)   # default is stacking by rows
-    if mode == 'Neoantigen':
-        
-        if MHCmode == 'MHCI':
-            Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIresult']]
-        elif MHCmode == 'MHCII':
-            Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIIresult']]
-        Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/Neoantigen_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
-
-    elif mode == 'Peptide':
-        Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual']]
-        Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/JunctionPeptides_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
+    
+    Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/NeoJunction_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))
-
-
 
 
 def usage():
 
 
     print('Usage:')
-    print('python3 mhcPresent.py -i /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events/Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt -t breast_all -o /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events -d /data/salomonis2/LabFiles/Frank-Li/python3/data -k 8 -H HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01 -s /data/salomonis2/LabFiles/Frank-Li/python3/netMHCpan-4.1/netMHCpan -M MHCI -m Peptide -C 8 -c False --cutoffPSI 0.1 --cutoffSample 0.1 --cutoffTissue 0.1')
+    print('python3 mhcPresent.py -i /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events/Hs_RNASeq_top_alt_junctions-PSI_EventAnnotation.txt -t breast_all -o /data/salomonis2/LabFiles/Frank-Li/breast_cancer_run/all_events -d /data/salomonis2/LabFiles/Frank-Li/python3/data -k 8 -H HLA-A01:01,HLA-A03:01,HLA-B07:02,HLA-B27:05,HLA-B58:01 -s /data/salomonis2/LabFiles/Frank-Li/python3/netMHCpan-4.1/netMHCpan -M MHCI -m singleSample -C 8 -c False --cutoffPSI 0.1 --cutoffSample 0.1 --cutoffTissue 0.1')
     print('Options:')
     print('-i : path of input file')
     print('-t : the name of your task')
@@ -1793,7 +1787,7 @@ def usage():
     print('-H : queried HLA alleles')
     print('-s : full path for where netMHCpan sit')
     print('-M : MHCmode, either MHCI or MHCII')
-    print('-m : Get Splicing peptides or Neoantigens')
+    print('-m : mode for generating Neo-Junctions')
     print('-C : how many processes you wanna spawn')
     print('-c: check GTEx data or not')
     print('--cutoffPSI : above this PSI value will be labelled as expressed')
@@ -1844,7 +1838,7 @@ if __name__ == "__main__":
             print('MHCI or MHCII:',arg)
         elif opt in ('-m'):
             mode = str(arg)
-            print('Get Splicing peptides or Neoantigens:',arg)
+            print('How to get Neo-Junction:',arg)
         elif opt in ('-C'):
             Core = int(arg)
             print('How many processes to use:',arg)

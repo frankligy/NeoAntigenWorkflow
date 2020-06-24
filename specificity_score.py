@@ -152,7 +152,10 @@ def scoring_process(df_evaluation,cutoff_PSI,cutoff_readcounts,max_mat_ori,min_m
     print(mat_eval_new)
     IWscore = []
     for m in range(df_evaluation.shape[0]):
-        IWscore.append(core_IW(mat_eval_new[m,:],leading_eigenvector))
+        score = core_IW(mat_eval_new[m,:],leading_eigenvector)
+        inverse_score = (-1.0) * float(score)
+        sigmoid_score = sigmoid(inverse_score)
+        IWscore.append(sigmoid_score)
     df_evaluation['IWscore'] = IWscore
     return df_evaluation
 
@@ -167,12 +170,17 @@ def core_IW(array,weight):
     IW = np.dot(array,weight)     # vectorization
     return IW
 
+def sigmoid(x):
+    x = float(x)
+    y = 1/(1+np.exp(-x))
+    return y
+
 
 
 if __name__ == '__main__':
     # load training set 
     dataFolder = '/data/salomonis2/LabFiles/Frank-Li/python3/data'
-    training = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/specificity-score/df_train_LUAD.txt',sep='\t')
+    training = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/specificity-score/df_train_breast.txt',sep='\t')
     # max_mat_ori,min_mat_ori,max_mat_rescale,min_mat_rescale,leading_eigenvector = training_process(training,0.1,3)
     # print(max_mat_ori,min_mat_ori,max_mat_rescale,min_mat_rescale,leading_eigenvector)
 
@@ -182,6 +190,6 @@ if __name__ == '__main__':
     min_mat_rescale = [-1.69933277,-1.43360037,-2.65506607,-0.30237015,-0.30285234,-2.89327914]
     leading_eigenvector = [0.48264742,0.47174347,0.47383551,0.21692184,0.22945297,0.46934607]
     df_new = scoring_process(training,0.1,3,max_mat_ori,min_mat_ori,max_mat_rescale,min_mat_rescale,leading_eigenvector)
-    df_new.to_csv('df_new_LUAD.txt',sep='\t',index=None)
+    df_new.to_csv('/data/salomonis2/LabFiles/Frank-Li/specificity-score/df_new_breast.txt',sep='\t',index=None)
     
 

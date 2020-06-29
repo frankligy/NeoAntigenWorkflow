@@ -279,11 +279,86 @@ array([0.2158908 , 0.33372127, 0.20192451, 0.41047172, 0.2295425 ,
        0.20682632, 0.2817167 , 0.14172125, 0.14058824, 0.04602353])
 '''    
 
+# using relative position to calculate the weight
+occurence_matrix = np.zeros([20,8])
+for i in range(len(pep_pos)):
+    if pep_pos_len[i] == 8:
+        py = pyramid[8]
+        for j in range(1,9):
+
+            row = transform[pep_pos[i][j-1]]
+            occurence_matrix[row,j-1] += 1
+    elif pep_pos_len[i] == 9:
+        py = pyramid[9]
+        for j in range(1,9):
+            for pos in py[j]:
+                row = transform[pep_pos[i][pos-1]]
+                occurence_matrix[row,j-1] += 1
+    elif pep_pos_len[i] == 10:
+        py = pyramid[10]
+        for j in range(1,9):
+            for pos in py[j]:
+                row = transform[pep_pos[i][pos-1]]
+                occurence_matrix[row,j-1] += 1  
+    elif pep_pos_len[i] == 11:
+        py = pyramid[11]
+        for j in range(1,9):
+            for pos in py[j]:
+                row = transform[pep_pos[i][pos-1]]
+                occurence_matrix[row,j-1] += 1
+                
+freq_matrix = np.zeros([20,8])
+aalist = 'ARNDCQEGHILKMFPSTWYV'
+for i in range(len(aalist)):
+    for j in range(0,8):
+        freq_matrix[i,j] = occurence_matrix[i,j]/sum(occurence_matrix[:,j])
         
 
 
+occurence_matrix_neg = np.zeros([20,8])
+for i in range(len(pep_neg)):
+    if pep_neg_len[i] == 8:
+        py = pyramid[8]
+        for j in range(1,9):
+
+            row = transform[pep_neg[i][j-1]]
+            occurence_matrix_neg[row,j-1] += 1
+    elif pep_neg_len[i] == 9:
+        py = pyramid[9]
+        for j in range(1,9):
+            for pos in py[j]:
+                row = transform[pep_neg[i][pos-1]]
+                occurence_matrix_neg[row,j-1] += 1
+    elif pep_neg_len[i] == 10:
+        py = pyramid[10]
+        for j in range(1,9):
+            for pos in py[j]:
+                row = transform[pep_neg[i][pos-1]]
+                occurence_matrix_neg[row,j-1] += 1  
+    elif pep_neg_len[i] == 11:
+        py = pyramid[11]
+        for j in range(1,9):
+            for pos in py[j]:
+                row = transform[pep_neg[i][pos-1]]
+                occurence_matrix_neg[row,j-1] += 1
+                
+freq_matrix_neg = np.zeros([20,8])
+aalist = 'ARNDCQEGHILKMFPSTWYV'
+for i in range(len(aalist)):
+    for j in range(0,8):
+        freq_matrix_neg[i,j] = occurence_matrix_neg[i,j]/sum(occurence_matrix_neg[:,j])
 
 
+importance = np.zeros([8,])
+for j in range(freq_matrix.shape[1]):
+    #importance[j] = sc.entropy(mat_mer9_freq[:,j],mat_mer9_freq_neg[:,j]) 
+    importance[j] = KL_divergence(freq_matrix[:,j],freq_matrix_neg[:,j]) 
+    
+'''
+it seems like relative position will offset the unique characteristics of each position
+array([0.0917328 , 0.08929413, 0.04302407, 0.02688196, 0.03269027,
+       0.03101008, 0.0171429 , 0.04138144])
+'''
 
 
 

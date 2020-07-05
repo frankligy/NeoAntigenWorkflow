@@ -13,6 +13,8 @@ import os
 from sklearn.model_selection import train_test_split,cross_val_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn import metrics
+from sklearn.svm import SVC
+import pickle
 
 
 # load HLA-A*0201 sequence
@@ -223,10 +225,10 @@ Y = data['cond'].values
 # machine learning
 
 # split training and testing set
-X_train,X_test,Y_train,Y_test = train_test_split(X,Y,test_size =0.2,random_state=55)
+X_train,X_test,Y_train,Y_test = train_test_split(X,Y,test_size =0.2,random_state=255)
 
 # Random Forest
-clf = RandomForestClassifier(min_samples_split=5,random_state =55)
+clf = RandomForestClassifier(min_samples_split=5,random_state =255)
 clf.fit(X_train,Y_train)
 clf.predict(X_test)
 clf.predict_proba(X_test)
@@ -249,11 +251,23 @@ metrics.roc_auc_score(Y_test,clf.predict(X_test))
 precision,recall,thresholds = metrics.precision_recall_curve(Y_test,clf.predict(X_test))
 metrics.plot_precision_recall_curve(clf,X_test,Y_test)
 
-
+# Matthews correlation
+corr = metrics.matthews_corrcoef(Y_test,clf.predict(X_test))
 
 # SVM
+clf = SVC(probability=True,random_state=1)
+clf.fit(X_train,Y_train)
+clf.predict(X_test)
 
+scores = cross_val_score(clf,X,Y,cv=5)
 
+# Neural Network
+with open('/Users/ligk2e/Desktop/immunogenecity/X.p','wb') as f:
+    pickle.dump(X,f)
+    
+with open('/Users/ligk2e/Desktop/immunogenecity/Y.p','wb') as f:
+    pickle.dump(Y,f)
+    
         
         
         

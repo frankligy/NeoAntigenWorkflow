@@ -121,7 +121,8 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
         #self.df['back_seq'] = back_seq
         self.df['cond'] = cond
         self.df = self.df[self.df['cond']]
-        self.df.drop(columns=['cond'])
+        self.df = self.df.drop(columns=['cond'])
+        self.df = self.df.set_index(pd.Index(np.arange(self.df.shape[0])))
 
         
     def matchWithExonlist(self,df_exonlist,dict_exonCoords):
@@ -204,7 +205,6 @@ def third_round_mhc(temp,second):  # after second run
     EnsGID_this = list(temp.keys())[0].split(':')[1]
     exam1 = list(temp.values())[0][0].split('-')[0]   # E22
     exam2 = list(temp.values())[0][0].split('-')[1]   # ENSG:E31
-    second
     if second == [''] and 'ENSG' in exam2:  # trans-splicing(non_trailing)
         EnsGID_trans = exam2.split(':')[0]
         exam2_trans = exam2.split(':')[1]
@@ -734,7 +734,7 @@ class NeoJ(Meta):
     def getNmer(self):
         col = []
         for i in range(self.df.shape[0]):
-            print(i,'first round-Process{}'.format(os.getpid()))
+            #print(i,'first round-Process{}'.format(os.getpid()))
             peptides = list(self.df['peptide'])[i]   
 
             if peptides == ['None']: col.append(['MANNUAL'])
@@ -753,7 +753,7 @@ class NeoJ(Meta):
     def mannual(self):
         col = []
         for i in range(self.df.shape[0]):
-            print(i,'second mannual round-process{}'.format(os.getpid()))
+            #print(i,'second mannual round-process{}'.format(os.getpid()))
             merArray = []
             uid,junction,Nmer = self.df['UID'].tolist()[i],self.df['exam_seq'].tolist()[i],self.df['{0}mer'.format(self.mer)].tolist()[i]
             if Nmer == ['MANNUAL']: 
@@ -1305,14 +1305,17 @@ def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
         else:
             tissueCounter = 0
             for tis,exp in tissueExp.items():
+                if tis == 'Cells - Cultured fibroblasts' or tis == 'Cells - Leukemia cell line (CML)' or tis == 'Cells - EBV-transformed lymphocyte':  # these tissue are tumor tissue, should be excluded
+                    continue
+                else:
     
-                exp = exp.astype('float64')
-                exp[np.isnan(exp)] = 0.0   # nan means can not detect the gene expression
-                hits = sum([True if i > cutoff_PSI else False for i in exp])   # in a tissue, how many samples have PSI > cutoff value
-                total = exp.size    # how many samples for each tissue type
-                sampleRatio = hits/total    # percentage of sampels that are expressing this event
-                if sampleRatio > cutoff_sampleRatio: tissueCounter += 1   # this tissue is expressiing this event
-            tissueRatio = tissueCounter/54    # 54 tissue types in total
+                    exp = exp.astype('float64')
+                    exp[np.isnan(exp)] = 0.0   # nan means can not detect the gene expression
+                    hits = sum([True if i > cutoff_PSI else False for i in exp])   # in a tissue, how many samples have PSI > cutoff value
+                    total = exp.size    # how many samples for each tissue type
+                    sampleRatio = hits/total    # percentage of sampels that are expressing this event
+                    if sampleRatio > cutoff_sampleRatio: tissueCounter += 1   # this tissue is expressiing this event
+            tissueRatio = tissueCounter/51    # 51 tissue types in total,excluding three cancer cell lines
             if tissueRatio > cutoff_tissueRatio:
                 cond = False
                 col.append(cond)
@@ -1322,6 +1325,7 @@ def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
     df['cond'] = col
     new_df = df[df['cond']]
     new_df = new_df.drop(columns = ['cond'])
+    new_df = new_df.set_index(pd.Index(np.arange(new_df.shape[0])))
     return new_df       
         
     

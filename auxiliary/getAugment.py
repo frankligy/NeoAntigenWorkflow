@@ -1,43 +1,43 @@
-import os
-os.chdir('/Users/ligk2e/Desktop/project_test/resultMHC')
+'''
+Author: Frank Li <li2g2@mail.uc.edu>
+July 10th 2020 10:36PM
+
+'''
+
 import pandas as pd
+import numpy as np
+import os
 import ast
-import pickle
-neo_antigen8 = pd.read_csv('NeoJunction_8_mark.txt',sep='\t',usecols=['MHCIresult'])
-neo_antigen_list8 = neo_antigen8['MHCIresult'].tolist()
-neo_antigen9 = pd.read_csv('NeoJunction_9_mark.txt',sep='\t',usecols=['MHCIresult'])
-neo_antigen_list9 = neo_antigen9['MHCIresult'].tolist()
-neo_antigen10 = pd.read_csv('NeoJunction_10_mark.txt',sep='\t',usecols=['MHCIresult'])
-neo_antigen_list10 = neo_antigen10['MHCIresult'].tolist()
-neo_antigen11 = pd.read_csv('NeoJunction_11_mark.txt',sep='\t',usecols=['MHCIresult'])
-neo_antigen_list11 = neo_antigen11['MHCIresult'].tolist()
 
-def getb(list_):
-    sb,wb = [],[]
-    for item in list_:
-        if item == 'No candidates': continue
-        else: 
-            info = ast.literal_eval(item)
-            pep = info['HLA-B51:01']
-            pep_sb,pep_wb = pep[0],pep[1]
-            sb.extend(pep_sb)
-            wb.extend(pep_wb)
-    b = sb + wb
-    return b
-   
-b8 = getb(neo_antigen_list8)
-b9 = getb(neo_antigen_list9)
-b10 = getb(neo_antigen_list10)
-b11 = getb(neo_antigen_list11)
-btotal = b8+b9+b10+b11
-len(btotal)
-type(btotal)
+def extract(k,HLA,folder,taskName,MHC):
+    with open(os.path.join(folder,'augment_{0}.fasta'.format(taskName)),'w') as f:
+        for i in k:
+            filePath = os.path.join(folder,'Neoantigen_{0}_{1}.txt'.format(i,taskName))
+            data = pd.read_csv(filePath,sep='\t')
+            colName = MHC + 'result'
+            targets = data[colName]   # Series object
+            for target in targets:
+                if target == 'No candidates': continue
+                else:
+                    target = ast.literal_eval(target)   # a dict
+                    for hla in HLA:
+                        strongBinding = target[hla][0]
+                        for sb in strongBinding:
+                            f.write('>{0}mer_{1}_strongBinding\n'.format(i,hla))
+                            f.write(sb+'\n')
+                        weakBinding = target[hla][1]
+                        for wb in weakBinding:
+                            f.write('>{0}mer_{1}_weakBinding\n'.format(i,hla))
+                            f.write(wb+'\n')
 
-# write to fasta
-def toFasta(list_):
-    with open('augment_b5101.fasta','w') as file1:
-        for index,item in enumerate(list_):
-            file1.write('>mer{0}\n'.format(index+1))
-            file1.write('{0}\n'.format(item))
-            
-toFasta(btotal)
+
+
+
+if __name__ == '__main__':
+    taskName = 'TCGA-E2-A10A-01'
+    folder_prefix = '/data/salomonis2/LabFiles/Frank-Li/mhc/TCGA-breast'
+    folder = os.path.join(folder_prefix, 'resultMHC_{0}'.format(taskName))
+    k = [8,9,10,11]
+    HLA = ['HLA-A02:06','HLA-A01:01','HLA-B35:01','HLA-B35:03','HLA-C04:04','HLA-C04:01']
+    MHC = 'MHCI'
+    extract(k,HLA,folder,taskName,MHC)

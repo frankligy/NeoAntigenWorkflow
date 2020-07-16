@@ -8,6 +8,10 @@ when running:
     scrapy crawl imgt -o out.json
 when using scrapy shell:
     scrapy shell 'url'
+
+
+after first time:
+conda activate selenium
 '''
 
 
@@ -26,8 +30,8 @@ class imgtSpider(scrapy.Spider):
         11: {1:(1,2,3,4),2:(2,3,4,5),3:(3,4,5,6),4:(4,5,6,7),5:(5,6,7,8),6:(6,7,8,9),7:(7,8,9,10),8:(8,9,10,11)}
     }
 
-    def __init__(self):
-        self.hla = ''
+    def __init__(self,hla):
+        self.hla = 'HLA-B*5301'
         path_to_chromedriver = '/Users/ligk2e/Downloads/chromedriver'   
         self.driver = webdriver.Chrome(executable_path=path_to_chromedriver)
         self.driver.implicitly_wait(5)
@@ -46,10 +50,11 @@ class imgtSpider(scrapy.Spider):
         for row in response.css('body#result div#data table.Results tbody tr')[1:]:  #[Selector,Selector,Selector...]   # don't need header
             mhc = row.css('td')[2].css('td::text').get()
 
-            if 'HLA-A*0201' in mhc:
-                # yield {
-                #     'mhc':mhc
-                # }
+            if self.hla in mhc:
+                yield {
+                    'mhc':mhc
+                }
+                raise Exception('stop and check')
                 url_suffix = row.css('td')[1].css('a::attr(href)').get()      # details.cgi?pdbcode=2CLR
                 # what we need is: http://www.imgt.org/3Dstructure-DB/cgi/details.cgi?pdbcode=2CLR&Part=CONT_OVERVIEW
                 url_next = 'http://www.imgt.org/3Dstructure-DB/cgi/' + url_suffix + '&Part=CONT_OVERVIEW'

@@ -18,6 +18,8 @@ from decimal import Decimal as D
 import argparse
 import bisect
 import requests
+import bz2
+import _pickle as cpickle
 
 
 
@@ -91,9 +93,15 @@ def convertExonList_pep(df):
         EnsGID = df.iat[i,0]
         EnsPID = df.iat[i,2]
         exonList = df.iat[i,3]
-        try: dictExonList[EnsGID][EnsPID] = exonList
-        except KeyError: dictExonList[EnsGID] = {EnsPID:exonList}
-        # {EnsGID:{EnsPID:exonList,EnsPID:exonList}}
+        try:
+            dictExonList[EnsGID].append((EnsPID,exonList))
+        except KeyError:
+            dictExonList[EnsGID] = []
+            dictExonList[EnsGID].append((EnsPID,exonList))
+
+        # try: dictExonList[EnsGID][EnsPID] = exonList
+        # except KeyError: dictExonList[EnsGID] = {EnsPID:exonList}
+        # {EnsGID:[(EnsPID,exonList),(EnsPID,exonList)]}
     return dictExonList
 
 
@@ -690,7 +698,7 @@ def ORF_check(df):
         print('The {}th run'.format(i))
         temp=uid(df,i) 
         EnsGID = list(temp.keys())[0].split(':')[1]
-        space = dictExonList_p[EnsGID]  # {'ENSP':exonlists,'ENSP':exonlists...}
+        space = dictExonList_p[EnsGID]  # [('ENSP',exonlists),('ENSP',exonlists)...]
         ORF = df.iloc[i]['ORF']
         first = df.iloc[i]['exam_first_whole_transcripts']
         second = df.iloc[i]['second_round']
@@ -704,6 +712,7 @@ def ORF_check(df):
         
         NMD = []
         translate = []
+        print(len(ORF),len(space))
         if len(ORF) == len(space):   # not trans-splicing events
  
             for j in range(len(ORF)):
@@ -713,9 +722,11 @@ def ORF_check(df):
                     translate.append('')
                 elif orf:
                     whole_ = whole[j]
-                    space_ENSP = list(space.keys())[j]
-                    space_exons = list(space.values())[j]
+                    space_ENSP = space[j][0]
                     
+                    space_exons = space[j][1]
+                    
+                    print(EnsGID,space_ENSP)
                     #result = grabEnsemblTranscriptTable(space_ENST)
                     result = check_translation(EnsGID,space_ENSP)
 
@@ -1025,12 +1036,59 @@ def biotype(df):
     return dic
     # {EnsGID:{EnsPID:Anno,EnsPID:Anno}}
 
+def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
+    with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp.pbz2'),'rb') as f1:
+        dicTissueExp = cpickle.load(f1)  
+    col = []
+    for i in range(df.shape[0]):
+        UID = df.iloc[i]['UID']
+        event = UID.split('|')[0]       # foreground event
+        try:
+            tissueExp = dicTissueExp[event]  # {heart:[],brain:[]}   # values are ndarray
+        except KeyError:
+            cond = True
+            col.append(cond)
+        else:
+            tissueCounter = 0
+            for tis,exp in tissueExp.items():
+                if tis == 'Cells - Cultured fibroblasts' or tis == 'Cells - Leukemia cell line (CML)' or tis == 'Cells - EBV-transformed lymphocyte':  # these tissue are tumor tissue, should be excluded
+                    continue
+                else:
+    
+                    exp = exp.astype('float64')
+                    exp[np.isnan(exp)] = 0.0   # nan means can not detect the gene expression
+                    hits = sum([True if i > cutoff_PSI else False for i in exp])   # in a tissue, how many samples have PSI > cutoff value
+                    total = exp.size    # how many samples for each tissue type
+                    sampleRatio = hits/total    # percentage of sampels that are expressing this event
+                    if sampleRatio > cutoff_sampleRatio: tissueCounter += 1   # this tissue is expressiing this event
+            tissueRatio = tissueCounter/51    # 51 tissue types in total,excluding three cancer cell lines
+            if tissueRatio > cutoff_tissueRatio:
+                cond = False
+                col.append(cond)
+            else: 
+                cond = True
+                col.append(cond)
+    df['cond'] = col
+    new_df = df[df['cond']]
+    new_df = new_df.drop(columns = ['cond'])
+    new_df = new_df.set_index(pd.Index(np.arange(new_df.shape[0])))
+    return new_df   
                             
     
 def main(args):
+    global intFile
+    global dataFolder
+    global outFolder
+    global taskName
+    global check
+
     intFile = args.intFile
     dataFolder = args.dataFolder
     outFolder = args.outFolder
+    taskName = args.taskName
+    check = args.check
+
+    if not os.path.exists(os.path.join(outFolder,'result_{0}'.format(taskName))): os.makedirs(os.path.join(outFolder,'result_{0}'.format(taskName)))
     
     #print(intFile,dataFolder,outFolder)
     # doesn't consider if EnsGID doesn't exist in existing ones, so if KeyError pops up, be aware of that
@@ -1052,6 +1110,14 @@ def main(args):
     dict_biotype = biotype(df_biotype)
     print('loding input file...')
     df = pd.read_csv(intFile,sep='\t')  # only one column name is 'UID'
+    print('GTEx check...')
+    if check == 'True':
+
+        df = check_GTEx(df,cutoff_PSI=0.1,cutoff_sampleRatio=0.1,cutoff_tissueRatio=0.1)
+        if df.shape[0] == 0:
+            raise Exception('After checking GTEx, no event remains')
+        df.to_csv(os.path.join(outFolder,'result_{0}'.format(taskName),'after_check.txt'),sep='\t',index=None)
+
     print('first round matching...')
     df_first = matchWithExonlist(df,df_exonlist,dict_exonCoords)  
     print('second round matching...')
@@ -1065,7 +1131,8 @@ def main(args):
     print('in-silico translation...')
     df_ORF_aa = getORFaa(df_ORF_check)  
     print('writing output file...') 
-    df_ORF_aa.to_csv(os.path.join(outFolder,'ORF_aa.txt'),sep='\t',index=None)
+
+    df_ORF_aa.to_csv(os.path.join(outFolder,'result_{0}'.format(taskName),'ORF_aa.txt'),sep='\t',index=None)
     
     
     
@@ -1076,6 +1143,8 @@ if __name__ == '__main__':
     parser.add_argument('--intFile',type=str,default='.',help='input file path')
     parser.add_argument('--dataFolder',type=str,default='./data',help='data folder path')
     parser.add_argument('--outFolder',type=str,default='.',help='output folder path')
+    parser.add_argument('--taskName',type=str,default='.',help='task Name')
+    parser.add_argument('--check',type=str,default='.',help='check tumor specificity or not')
     args = parser.parse_args()   # namespace object
     main(args)
 

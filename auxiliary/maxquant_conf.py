@@ -40,6 +40,7 @@ def numThreads(doc,thread):
 
 def add_input_files(doc,intFile):
     with open(intFile,'r') as f:
+        fraction = 1
         for line in f:
             line = line.rstrip('\n')
             # 'filePaths'
@@ -59,9 +60,10 @@ def add_input_files(doc,intFile):
             # 'fractions'
             if not type(doc['MaxQuantParams']['fractions']['short']) == list:
                 doc['MaxQuantParams']['fractions']['short'] = []
-                doc['MaxQuantParams']['fractions']['short'].append('32767')
+                doc['MaxQuantParams']['fractions']['short'].append(fraction)
             else:
-                doc['MaxQuantParams']['fractions']['short'].append('32767')
+                doc['MaxQuantParams']['fractions']['short'].append(fraction)
+            fraction += 1
              
             # 'ptms'
             if not type(doc['MaxQuantParams']['ptms']['boolean']) == list:
@@ -89,7 +91,17 @@ def add_input_files(doc,intFile):
                 
             
             
-def change_enzymes(doc,enzymes):
+def change_enzymes(doc,enzymes,mode):
+
+    '''
+    mode 0: unspecific
+    mode 3: semi-specific
+    mode 4: unspecific
+
+    '''
+
+    doc['MaxQuantParams']['parameterGroups']['parameterGroup']['enzymeMode'] = str(mode)
+
     if enzymes == None:
         doc['MaxQuantParams']['parameterGroups']['parameterGroup']['enzymes'] = None
     else:
@@ -106,10 +118,16 @@ def change_enzymes(doc,enzymes):
 
 
 
+def change_fdr(doc,protein_fdr,peptide_fdr,site_fdr):
+    doc['MaxQuantParams']['proteinFdr'] = protein_fdr
+    doc['MaxQuantParams']['peptideFdr'] = peptide_fdr
+    doc['MaxQuantParams']['siteFdr'] = site_fdr
+    return doc
 
 
-
-
+def change_contaminants(doc,include):
+    doc['MaxQuantParams']['includeContaminants'] = str(include)
+    return doc
 
 
 
@@ -121,17 +139,21 @@ def change_enzymes(doc,enzymes):
 
 if __name__ == '__main__':
 
-    with open('/data/salomonis2/LabFiles/Frank-Li/python3/mqpar.xml','r') as fd:
+    with open('/data/salomonis2/LabFiles/Frank-Li/python3/mqpar_iTRAQ_4plex.xml','r') as fd:
         doc = xmltodict.parse(fd.read())   # default mqpar.xml file
     
-    doc_1 = add_database_file(doc,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw/database.txt')
-    doc_2 = numThreads(doc_1,20)
-    doc_3 = add_input_files(doc_2,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw/intFile.txt')
-    doc_4 = change_enzymes(doc_3,['Trypsin','LysC'])
-    # doc_4 = change_enzymes(doc_3,None)
+    doc_1 = add_database_file(doc,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_unspecific/database.txt')
+    doc_2 = numThreads(doc_1,10)
+    doc_3 = add_input_files(doc_2,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_unspecific/intFile.txt')
+    
+    
+    #doc_4 = change_enzymes(doc_3,['Trypsin','LysC'],mode=3)
+    doc_4 = change_enzymes(doc_3,None,mode=4)
+    doc_5 = change_fdr(doc_4,protein_fdr=1,peptide_fdr=0.1,site_fdr=0.1)
+    doc_6 = change_contaminants(doc_5,False)
     a = xmltodict.unparse(doc_4,pretty=True,encoding='utf-8')
     a = a.replace('&gt;','>')
-    with open('/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw/mqpar.xml','w') as f1:
+    with open('/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_unspecific/mqpar.xml','w') as f1:
         f1.write(a)
   
 

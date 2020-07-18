@@ -731,14 +731,16 @@ def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
         else:
             tissueCounter = 0
             for tis,exp in tissueExp.items():
-    
-                exp = exp.astype('float64')
-                exp[np.isnan(exp)] = 0.0   # nan means can not detect the gene expression
-                hits = sum([True if i > cutoff_PSI else False for i in exp])   # in a tissue, how many samples have PSI > cutoff value
-                total = exp.size    # how many samples for each tissue type
-                sampleRatio = hits/total    # percentage of sampels that are expressing this event
-                if sampleRatio > cutoff_sampleRatio: tissueCounter += 1   # this tissue is expressiing this event
-            tissueRatio = tissueCounter/54    # 54 tissue types in total
+                if tis == 'Cells - Cultured fibroblasts' or tis == 'Cells - Leukemia cell line (CML)' or tis == 'Cells - EBV-transformed lymphocyte':  # these tissue are tumor tissue, should be excluded
+                    continue
+                else:
+                    exp = exp.astype('float64')
+                    exp[np.isnan(exp)] = 0.0   # nan means can not detect the gene expression
+                    hits = sum([True if i > cutoff_PSI else False for i in exp])   # in a tissue, how many samples have PSI > cutoff value
+                    total = exp.size    # how many samples for each tissue type
+                    sampleRatio = hits/total    # percentage of sampels that are expressing this event
+                    if sampleRatio > cutoff_sampleRatio: tissueCounter += 1   # this tissue is expressiing this event
+            tissueRatio = tissueCounter/51    # 51 tissue types in total,excluding three cancer cell lines
             if tissueRatio > cutoff_tissueRatio:
                 cond = False
                 col.append(cond)

@@ -1768,9 +1768,11 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     if mode == 'Neoantigen':
         
         if MHCmode == 'MHCI':
-            Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIresult']]
+            Crystal = Crystal.drop(['exam_seq','exam_whole_transcripts','exam_ORF_tran','exam_ORF_aa','phase'],axis=1)
+            #Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIresult']]
         elif MHCmode == 'MHCII':
-            Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIIresult']]
+            Crystal = Crystal.drop(['exam_seq','exam_whole_transcripts','exam_ORF_tran','exam_ORF_aa','phase'],axis=1)
+            #Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIIresult']]
         Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/Neoantigen_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
 
     elif mode == 'Peptide':

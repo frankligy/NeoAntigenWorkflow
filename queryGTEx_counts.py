@@ -159,11 +159,18 @@ def scratchPlusView1(dataFolder,outFolder):     # directly use pool for multipro
     dicTissueExp = merge_dicts(dicts)
 
 
-    with h5py.File(os.path.join(outFolder,'dicTissueExp_counts.hdf5'),'w') as f:
-        for event,tissueExp in dicTissueExp.items():
-            grp = f.create_group(event)   # /event when grp.name   # i think grp is a group object
-            for tissue,expression in tissueExp.items():
-                grp.create_dataset(tissue,data=expression)    # /event/tissue  # data has to be a ndarray, not an object
+    # with h5py.File(os.path.join(outFolder,'dicTissueExp_counts.hdf5'),'w') as f:
+    #     for event,tissueExp in dicTissueExp.items():
+    #         grp = f.create_group(event)   # /event when grp.name   # i think grp is a group object
+    #         for tissue,expression in tissueExp.items():
+    #             grp.create_dataset(tissue,data=expression)    # /event/tissue  # data has to be a ndarray, not an object
+
+    import bz2
+    import _pickle as cpickle
+    import pickle
+    with bz2.BZ2File('./data/dicTissueExp_counts.pbz2','wb') as f1:
+        cpickle.dump(dicTissueExp,f1)
+
 
 
     return dicTissueExp

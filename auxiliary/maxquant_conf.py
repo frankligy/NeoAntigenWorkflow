@@ -40,7 +40,7 @@ def numThreads(doc,thread):
 
 def add_input_files(doc,intFile):
     with open(intFile,'r') as f:
-        fraction = 1
+        experiment = 1
         for line in f:
             line = line.rstrip('\n')
             # 'filePaths'
@@ -53,17 +53,18 @@ def add_input_files(doc,intFile):
             # 'experiments'
             if not type(doc['MaxQuantParams']['experiments']['string']) == list:
                 doc['MaxQuantParams']['experiments']['string'] = []
-                doc['MaxQuantParams']['experiments']['string'].append(None)
+                doc['MaxQuantParams']['experiments']['string'].append(experiment)
             else:
-                doc['MaxQuantParams']['experiments']['string'].append(None)
+                doc['MaxQuantParams']['experiments']['string'].append(experiment)
+            experiment += 1
             
             # 'fractions'
             if not type(doc['MaxQuantParams']['fractions']['short']) == list:
                 doc['MaxQuantParams']['fractions']['short'] = []
-                doc['MaxQuantParams']['fractions']['short'].append(fraction)
+                doc['MaxQuantParams']['fractions']['short'].append('32767')
             else:
-                doc['MaxQuantParams']['fractions']['short'].append(fraction)
-            fraction += 1
+                doc['MaxQuantParams']['fractions']['short'].append('32767')
+
              
             # 'ptms'
             if not type(doc['MaxQuantParams']['ptms']['boolean']) == list:
@@ -97,6 +98,7 @@ def change_enzymes(doc,enzymes,mode):
     mode 0: unspecific
     mode 3: semi-specific
     mode 4: unspecific
+    mode 5: no digestion
 
     '''
 
@@ -131,7 +133,12 @@ def change_contaminants(doc,include):
 
 
 
-
+def change_length(doc,minPepLen,maxPeptideMass,minPeptideLengthForUnspecificSearch,maxPeptideLengthForUnspecificSearch):
+    doc['MaxQuantParams']['minPepLen'] = minPepLen
+    doc['MaxQuantParams']['maxPeptideMass'] = maxPeptideMass
+    doc['MaxQuantParams']['minPeptideLengthForUnspecificSearch'] = minPeptideLengthForUnspecificSearch
+    doc['MaxQuantParams']['maxPeptideLengthForUnspecificSearch'] = maxPeptideLengthForUnspecificSearch
+    return doc
 
 
 
@@ -142,18 +149,19 @@ if __name__ == '__main__':
     with open('/data/salomonis2/LabFiles/Frank-Li/python3/mqpar_iTRAQ_4plex.xml','r') as fd:
         doc = xmltodict.parse(fd.read())   # default mqpar.xml file
     
-    doc_1 = add_database_file(doc,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_unspecific/database.txt')
+    doc_1 = add_database_file(doc,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_nodigest_fdr10/database.txt')
     doc_2 = numThreads(doc_1,10)
-    doc_3 = add_input_files(doc_2,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_unspecific/intFile.txt')
+    doc_3 = add_input_files(doc_2,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_nodigest_fdr10/intFile.txt')
     
     
     #doc_4 = change_enzymes(doc_3,['Trypsin','LysC'],mode=3)
-    doc_4 = change_enzymes(doc_3,None,mode=4)
-    doc_5 = change_fdr(doc_4,protein_fdr=1,peptide_fdr=0.1,site_fdr=0.1)
-    doc_6 = change_contaminants(doc_5,False)
+    doc_4 = change_enzymes(doc_3,None,mode=5)
+    doc_5 = change_fdr(doc_4,protein_fdr=1,peptide_fdr=0.1,site_fdr=1)
+    doc_6 = change_contaminants(doc_5,True)
+    doc_7 = change_length(doc_6,8,3000,8,15)
     a = xmltodict.unparse(doc_4,pretty=True,encoding='utf-8')
     a = a.replace('&gt;','>')
-    with open('/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_unspecific/mqpar.xml','w') as f1:
+    with open('/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_nodigest_fdr10/mqpar.xml','w') as f1:
         f1.write(a)
   
 

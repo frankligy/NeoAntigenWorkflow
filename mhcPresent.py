@@ -389,8 +389,18 @@ def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonLis
     result = []
     for tran,item in transcripts.items():
         Exons1 = '|' + query
-        Exons2 = query + '|'        
-        if re.search(rf'{re.escape(Exons1)}',item) or re.search(rf'{re.escape(Exons2)}',item) or re.search(rf'{re.escape(query)}$',item):
+        Exons2 = query + '|'   
+        Exons12 = '|'  + query + '|'       
+        '''
+        This patch is for the a bug like this:
+        E8.3|E9.1 will match up to E8.1|E8.2|E8.3|E9.10
+        so change to the following:
+        1. either match to |E8.3|E9.1|
+        2. or you are at the beginning, then you have to match ^E8.3|E9.1|
+        3. or you are at the end, then you have to match E8.3|E9.1$
+        4. or the transcript is just E8.3|E9.1, then scenario3 still suffice
+        '''
+        if re.search(rf'{re.escape(Exons12)}',item) or re.search(rf'^{re.escape(Exons2)}',item) or re.search(rf'{re.escape(query)}$',item):
             exons = item.split('|')
             dict_judge = {}
             for j in range(len(exons)):
@@ -1805,7 +1815,7 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
         Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/Neoantigen_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
 
     elif mode == 'Peptide':
-        Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual']]
+        Crystal = Crystal.drop(['exam_seq','exam_whole_transcripts','exam_ORF_tran','exam_ORF_aa','phase'],axis=1)
         Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/JunctionPeptides_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
     
     endTime = process_time()

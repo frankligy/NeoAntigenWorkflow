@@ -92,6 +92,7 @@ def main(args):
                 continue
     
     df_PSI = df_PSI.join(pd.Series(col,name='count'))
+    df_PSI.columns = ['UID','PSI','count']
     df_PSI.to_csv(os.path.join(outdir,'{0}_ori.txt'.format(samplePSI)),sep='\t',index=None)
 
 

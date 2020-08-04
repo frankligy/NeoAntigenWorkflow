@@ -146,22 +146,22 @@ def change_length(doc,minPepLen,maxPeptideMass,minPeptideLengthForUnspecificSear
 
 if __name__ == '__main__':
 
-    with open('/data/salomonis2/LabFiles/Frank-Li/python3/mqpar_iTRAQ_4plex.xml','r') as fd:
+    with open('/data/salomonis2/LabFiles/Frank-Li/python3/mqpar.xml','r') as fd:   # mqpar_iTRAQ_4plex.xml
         doc = xmltodict.parse(fd.read())   # default mqpar.xml file
     
-    doc_1 = add_database_file(doc,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_nodigest_fdr10/database.txt')
+    doc_1 = add_database_file(doc,'/data/salomonis2/LabFiles/Frank-Li/clinical/ovarian/MS/OvCa99/database.txt')
     doc_2 = numThreads(doc_1,10)
-    doc_3 = add_input_files(doc_2,'/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_nodigest_fdr10/intFile.txt')
+    doc_3 = add_input_files(doc_2,'/data/salomonis2/LabFiles/Frank-Li/clinical/ovarian/MS/OvCa99/intFile.txt')
     
     
     #doc_4 = change_enzymes(doc_3,['Trypsin','LysC'],mode=3)
     doc_4 = change_enzymes(doc_3,None,mode=5)
-    doc_5 = change_fdr(doc_4,protein_fdr=1,peptide_fdr=0.1,site_fdr=1)
+    doc_5 = change_fdr(doc_4,protein_fdr=1,peptide_fdr=0.01,site_fdr=1)
     doc_6 = change_contaminants(doc_5,True)
     doc_7 = change_length(doc_6,8,3000,8,15)
     a = xmltodict.unparse(doc_4,pretty=True,encoding='utf-8')
     a = a.replace('&gt;','>')
-    with open('/data/salomonis2/LabFiles/Frank-Li/CPTAC/TCGA_breast/TCGA_E2-A10A-01/raw_nodigest_fdr10/mqpar.xml','w') as f1:
+    with open('/data/salomonis2/LabFiles/Frank-Li/clinical/ovarian/MS/OvCa99/mqpar.xml','w') as f1:
         f1.write(a)
   
 

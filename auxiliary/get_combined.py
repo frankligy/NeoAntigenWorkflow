@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import os
 import ast
+import argparse
 
 
 
@@ -29,14 +30,33 @@ def extract(k,HLA,folder,taskName,MHC):
 
 
 
+def change_HLA_format(HLA):   #'HLA-A32:01,HLA-A68:01,HLA-B40:01,HLA-B51:01,HLA-C02:02,HLA-C16:01'
+    result = HLA.split(',')
+    return result
+
+
+
+def main(args):
+
+    taskName = args.task
+    folder_prefix = args.outdir
+    HLA = change_HLA_format(args.HLA)
+
+
+    folder = os.path.join(folder_prefix, 'resultMHC_{0}'.format(taskName))
+    k = [8,9,10,11]
+    HLA = ['HLA-A02:06','HLA-A01:01','HLA-B35:01','HLA-B35:03','HLA-C04:04','HLA-C04:01']   # same as -H in mhcPresent.py
+    MHC = 'MHCI'
+    extract(k,HLA,folder,taskName,MHC)
+
 
 
 
 if __name__ == '__main__':
-    taskName = 'PSI.Normal-like_vs_Others'   # same as -t in mhcPresent.py
-    folder_prefix = '/data/salomonis2/LabFiles/Frank-Li/Anu/first'   # same as -o in mhcPresent.py
-    folder = os.path.join(folder_prefix, 'resultMHC_{0}'.format(taskName))
-    k = [8,9,10,11]
-    HLA = ['HLA-A02:01','HLA-A01:01','HLA-B07:02','HLA-B08:01','HLA-C07:01','HLA-C04:01']   # same as -H in mhcPresent.py
-    MHC = 'MHCI'
-    extract(k,HLA,folder,taskName,MHC)
+    parser = argparse.ArgumentParser(description='combine 8mer, 9mer, 10mer, 11mer')
+    parser.add_argument('--task',type=str,default=None,help='task name, same as task in mhcPresent.py')
+    parser.add_argument('--outdir',type=str,default='.',help='output dicrectory, same as outFolder in mhcPresent.py')
+    parser.add_argument('--HLA',type=str,default=None,help='HLA type we want to inspect, same as HLA in mhcPresent.py')
+    args=parser.parse_args()
+    main(args)
+

@@ -17,7 +17,7 @@ import pandas as pd
 
 
 
-s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing')
+s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing1')
 y_pred = s['y_pred']
 predictions = s['predictions']
 y = s['y']

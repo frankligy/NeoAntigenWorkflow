@@ -11,47 +11,21 @@ Created on Fri Aug  7 11:27:25 2020
 import shelve
 import torch
 import numpy as np
-from sklearn.metrics import roc_curve, auc, precision_recall_curve, confusion_matrix
+from sklearn.metrics import roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score
 import matplotlib.pyplot as plt
 import pandas as pd
 
 
 
-s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing1')
+s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing12')
 y_pred = s['y_pred']
 predictions = s['predictions']
 y = s['y']
 
-diff = []
-for i in range(len(y_pred)):
-    diff.append(ast.literal_eval(np.format_float_scientific(y_pred[i,1])) - ast.literal_eval(np.format_float_scientific(y_pred[i,0])))
+confusion_matrix(y,predictions)
+f1_score(y,predictions)
 
 
-
-diff = np.subtract(y_pred[:,1],y_pred[:,0])
-
-
-bundle = [i for i in zip(y_pred[:,1],predictions,y)]
-sorted_bundle = np.array(sorted(bundle,key=lambda x: x[0]))
-
-metrics = rank(sorted_bundle[:,[1,2]],step=10)
-
-
-# rank
-
-def rank(xy,step=10):
-    metrics = []
-    for i in range(len(xy)//step):
-        query = xy[0:step*(i+1)]       
-        confusion_mat = confusion_matrix(query[:,1],query[:,0],labels=[0,1])
-        fpr = confusion_mat[0,1]/np.sum(confusion_mat[:,1])
-        tpr = confusion_mat[0,0]/np.sum(confusion_mat[:,0])
-        
-        recall = tpr
-        precision = confusion_mat[0,1]/np.sum(confusion_mat[0:])
-        metrics.append((fpr,tpr,recall,precision))
-    return metrics
-        
 
 
 
@@ -62,7 +36,7 @@ def rank(xy,step=10):
 # draw ROC curve
 fpr,tpr,_ = roc_curve(y,y_pred[:,1],pos_label=1)
 area = auc(fpr,tpr)
-plt.figure()
+fig = plt.figure()
 lw = 2
 plt.plot(fpr, tpr, color='darkorange',
          lw=lw, label='ROC curve (area = %0.2f)' % area)
@@ -74,6 +48,7 @@ plt.ylabel('True Positive Rate')
 plt.title('Receiver operating characteristic example')
 plt.legend(loc="lower right")
 plt.show()
+#fig.savefig('/Users/ligk2e/Desktop/immunogenecity/roc.svg')
 
 # draw PR curve
 precision,recall,_ = precision_recall_curve(y,y_pred[:,1],pos_label=1)
@@ -84,7 +59,7 @@ plt.figure()
 lw = 2
 plt.plot(recall,precision, color='darkorange',
          lw=lw, label='PR curve (area = %0.2f)' % area_PR)
-plt.plot([0, 1], [0.1976, 0.1976], color='navy', lw=lw, linestyle='--')
+plt.plot([0, 1], [0.24, 0.24], color='navy', lw=lw, linestyle='--')
 plt.xlim([0.0, 1.0])
 plt.ylim([0.0, 1.05])
 plt.xlabel('Recall')
@@ -169,7 +144,133 @@ plt.title('PR curve example')
 plt.legend(loc="lower right")
 plt.show()
 
-### benchmark with
+### benchmark with netCTLpan1.1
+df = pd.read_excel('/Users/ligk2e/Desktop/immunogenecity/testing_more.xlsx')
+y = df['immunogenecity'].values
+y_pred = df['netCTLpan'].values.astype('float64')
+
+# draw ROC curve
+fpr,tpr,_ = roc_curve(y,y_pred,pos_label=1)
+area = auc(fpr,tpr)
+plt.figure()
+lw = 2
+plt.plot(fpr, tpr, color='darkorange',
+         lw=lw, label='ROC curve (area = %0.2f)' % area)
+plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver operating characteristic example')
+plt.legend(loc="lower right")
+plt.show()
+
+# draw PR curve
+precision,recall,_ = precision_recall_curve(y,y_pred,pos_label=1)
+area_PR = auc(recall,precision)
+baseline = np.sum(np.array(y) == 1) / len(y)
+
+plt.figure()
+lw = 2
+plt.plot(recall,precision, color='darkorange',
+         lw=lw, label='PR curve (area = %0.2f)' % area_PR)
+plt.plot([0, 1], [0.1976, 0.1976], color='navy', lw=lw, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.title('PR curve example')
+plt.legend(loc="lower right")
+plt.show()
+
+
+# benchmark with deephlapan
+df = pd.read_csv('/Users/ligk2e/Desktop/immunogenecity/value.txt',sep='\t',names=['y','y_pred'])
+y = df['y'].values
+y_pred = df['y_pred'].values
+# draw ROC curve
+fpr,tpr,_ = roc_curve(y,y_pred,pos_label=1)
+area = auc(fpr,tpr)
+plt.figure()
+lw = 2
+plt.plot(fpr, tpr, color='darkorange',
+         lw=lw, label='ROC curve (area = %0.2f)' % area)
+plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver operating characteristic example')
+plt.legend(loc="lower right")
+plt.show()
+
+# draw PR curve
+precision,recall,_ = precision_recall_curve(y,y_pred,pos_label=1)
+area_PR = auc(recall,precision)
+baseline = np.sum(np.array(y) == 1) / len(y)
+
+plt.figure()
+lw = 2
+plt.plot(recall,precision, color='darkorange',
+         lw=lw, label='PR curve (area = %0.2f)' % area_PR)
+plt.plot([0, 1], [0.1976, 0.1976], color='navy', lw=lw, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.title('PR curve example')
+plt.legend(loc="lower right")
+plt.show()
+
+
+#new dataset with deephlapan
+df1 = pd.read_csv('/Users/ligk2e/Desktop/immunogenecity/shuffle_testing.txt',sep='\t')
+df2 = pd.read_csv('/Users/ligk2e/Desktop/immunogenecity/shuffle_testing_final_predicted_result.csv')
+y=df1['immunogenecity'].values
+y_pred=df2['immunogenic score'].values
+
+hard_y = [1 if i > 0.5 else 0 for i in y_pred]
+
+counter = 0
+for i in range(len(y)):
+    if y[i] == hard_y[i]: counter += 1
+
+# accuracy 58.92%
+
+# draw ROC curve
+fpr,tpr,_ = roc_curve(y,y_pred,pos_label=1)
+area = auc(fpr,tpr)
+plt.figure()
+lw = 2
+plt.plot(fpr, tpr, color='darkorange',
+         lw=lw, label='ROC curve (area = %0.2f)' % area)
+plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver operating characteristic example')
+plt.legend(loc="lower right")
+plt.show()
+
+# draw PR curve
+precision,recall,_ = precision_recall_curve(y,y_pred,pos_label=1)
+area_PR = auc(recall,precision)
+baseline = np.sum(np.array(y) == 1) / len(y)
+
+plt.figure()
+lw = 2
+plt.plot(recall,precision, color='darkorange',
+         lw=lw, label='PR curve (area = %0.2f)' % area_PR)
+plt.plot([0, 1], [0.24, 0.24], color='navy', lw=lw, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.title('PR curve example')
+plt.legend(loc="lower right")
+plt.show()
+
 
 
 

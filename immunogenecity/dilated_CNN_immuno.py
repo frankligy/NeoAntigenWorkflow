@@ -16,8 +16,10 @@ import time
 import random
 import itertools
 from Bio.SubsMat import MatrixInfo
+import argparse
+import shelve
 
-from torch.utils.data import Dataset, DataLoader, random_split,Subset
+from torch.utils.data import Dataset, DataLoader, random_split,Subset,ConcatDataset
 import torch
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn as nn
@@ -190,7 +192,7 @@ def sort_by_value(dic,reverse,num=None):
 def get_whole_seq(path,data_clean):
     whole = []
     for i in range(data_clean.shape[0]):
-        print(i)
+        #print(i)
         peptide = data_clean.iloc[i]['peptide']
         hla = data_clean.iloc[i]['HLA']
         try:
@@ -224,7 +226,7 @@ def dict_inventory(inventory):
     return dic
 
 def rescue_unknown_hla(hla,dic_inventory):
-    print(hla)
+    #print(hla)
     type_ = hla[4]
     first2 = hla[6:8]
     last2 = hla[9:11]
@@ -260,7 +262,7 @@ class MyDataSet(Dataset):
         whole = self.original['whole']
         for_padding = []
         for i in range(whole.shape[0]):
-            print(i)
+            #print(i)
             length = len(whole[i])
             result = np.zeros([length,20])
             for j in range(len(whole[i])):   # iterate each amino acid
@@ -287,7 +289,8 @@ class MyDataSet(Dataset):
     def padding(self,lis):   # accept for_padding
         
         # find max_length
-        max_length=max([torch.shape[0] for torch in lis])
+        #max_length=max([torch.shape[0] for torch in lis])
+        max_length=79
         
         # padding
         bucket = []
@@ -395,7 +398,7 @@ def calculate_conv2d_dimension(dim_in,padding,dilation,kernel,stride):
                 
 
 class dilated_CNN(nn.Module):
-    def __init__(self,length,channel=1,filters=16,kernel=(10,20),stride=(1,1),padding=(0,0),dilation=(2,1),hidden=100):
+    def __init__(self,length,channel=1,filters=16,kernel=(10,20),stride=(1,1),padding=(0,0),dilation=(3,1),hidden=100):
         super(dilated_CNN,self).__init__()
         self.length = length
         self.channel = channel
@@ -454,13 +457,17 @@ class dilated_CNN(nn.Module):
         self.Sigmoid = nn.Sigmoid()
         
     def forward(self,x):   # x: [batch,channel,h=max_length,w=20]
+        #print(x.size())
         out = self.layer1(x)
+        #print(out.size())
 
         out = self.layer2(out)
+        #print(out.size())
         out = out.view(out.shape[0],-1)
+        #print(out.size())
 
         out = self.layer3(out)
-        out = self.Sigmoid(out)
+        #out = self.Sigmoid(out)
         return out
         
 
@@ -522,77 +529,249 @@ def balancedBinaryLoader(dataset,batch_size):
     loader = list(zip(chunks_X_list,chunks_y_list)) # zip can only be iterated once
     return loader    
 
-if __name__ == '__main__':
-    
-    start_time = time.time()
-    
-    data = pd.read_excel('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/data/data.xlsx')
-    data_clean = clean_data_frame(data)
-    data_clean = clean_hla(data_clean)
-    data_clean = convert_hla(data_clean)
-    
-    hla_seq = read_hla('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/hla_seq/hla_seq.txt')
-    inventory = pd.read_csv('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/imgt_contact/inventory.txt',sep='\n',header=None)[0].tolist() 
+def convert_hla_test(data_clean2):
+    hla = data_clean2['HLA']
+    new = []
+    for i in hla:
+        i = i[0:7] + ':' + i[7:]
+        if not '*' in i: 
+            new.append(i[0:5]+'*'+i[5:])
+        else:
+            new.append(i)
+
+    data_clean2.update({'HLA':new})
+    return data_clean2
+
+
+def preprocess(ori,mode):
+
+
+    global data_torch
+    global hla_seq
+    global inventory
+    global dic_inventory
+    global data_whole
+
+    if mode == 'train':
+        data = pd.read_excel(ori)
+        data_clean = clean_data_frame(data)
+        data_clean = clean_hla(data_clean)
+        data_clean = convert_hla(data_clean)
+
+    elif mode == 'test':
+        data = pd.read_excel(ori)
+        data_clean = clean_data_frame(data)
+        data_clean = convert_hla_test(data_clean)
+        
+
+        
+    hla_seq = read_hla('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/hla_seq/hla_seq.txt')
+    inventory = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/imgt_contact/inventory.txt',sep='\n',header=None)[0].tolist() 
     dic_inventory = dict_inventory(inventory)   
-    data_whole = get_whole_seq('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/imgt_contact',data_clean)
-    
-    
+    data_whole = get_whole_seq('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/imgt_contact',data_clean)   
     data_torch = MyDataSet(data_whole)
 
-    #training_set, validation_set, testing_set = random_split(data_torch,(200,5,4))
-    training_set, testing_set = random_split(data_torch,(40000,3519))
+
+def main(args):
+    mode = args.mode
+    ori = args.data
+
+    if mode == 'train':
+        preprocess(ori,mode)
+
+        training_set = data_torch   # use all data        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        data_torch_training_loader = balancedBinaryLoader(training_set,batch_size=512)
+        model = dilated_CNN(data_torch.max_length).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001,weight_decay = 0.0001)
+        scheduler = scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, factor=0.1, patience=2, verbose=True)
+        # if it observe a non-decreasing loss, give you another (patience-1) more chances, if still not decrease, will reduce 
+        # learning rate to factor*learning rate
+        loss_f=nn.CrossEntropyLoss()
+
+        num_epochs = 80
+        for epoch in range(num_epochs):
+            loss_list = []
+            acc_list = []
+            for i in data_torch_training_loader:
+
+
+                X = i[0].unsqueeze(1).float().to(device)
+                y = i[1].long().to(device)
+                #print(X.size(),y,size())
+                optimizer.zero_grad()   # because the gradient calculation only for each mini-batch, so need to zero it at every mini-batch.
+                
+                y_pred = model(X)
+                loss = loss_f(y_pred,y)
+                loss.backward()   # calculate gradient
+                optimizer.step()        # update gradient
+                loss_list.append(loss.item())
+                
+                num_correct = 0
+                num_samples = 0
+                _,predictions = y_pred.max(1)
+
+                num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+
+                num_samples  += predictions.size(0)
+
+                acc_list.append(float(num_correct)/float(num_samples)*100)
+                
+            loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
+        
+            scheduler.step(loss)
+            print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
+
+        # save the model
+        torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/CNN_model/model_weight_decay_sigmoid_80.pth')
+
+    elif mode == 'test':
+        preprocess(ori,mode)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        data_torch_loader = DataLoader(data_torch,batch_size=1395,shuffle=True,drop_last=True)
+
+
+        model = dilated_CNN(79).to(device)
+        model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/CNN_model/model_weight_decay_sigmoid_80.pth'))
+
+        model.eval()   # let model know to shut off batchnorm and dropout or turn them into evaluation mode
+        
+        with torch.no_grad():   # don't backprop
+            for i,(x,y) in enumerate(data_torch_loader):
+
+                x = x.unsqueeze(1).float().to(device)
+                y = y.long().to(device)
+                y_pred = model(x)
+                print(y_pred)
+                
+                num_correct = 0
+                num_samples = 0
+                _,predictions = y_pred.max(1)
+                print('Predicted:',predictions)
+                print('True:',y)
+
+                num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+
+                num_samples  += predictions.size(0)
+
+                print('Accuracy:',float(num_correct)/float(num_samples)*100)
+
+                s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/CNN_model/new_testing_with_sigmoid_onlyin_training')
+                s['y_pred'] = y_pred.detach().cpu().numpy()
+                s['predictions'] = predictions.detach().cpu().numpy()
+                s['y'] = y.detach().cpu().numpy()
+                s.close()
+
+
+
+
+
+
+
+if __name__ == '__main__':
+
+    Parser = argparse.ArgumentParser(description='dilated_CNN_model_all')
+    Parser.add_argument('--mode',type=str,default='score',help='you wanna train, test or score a single neoantigen')
+    Parser.add_argument('--data',type=str,default='.',help='path to the training or testing dataset')
+    args = Parser.parse_args()
+
+    main(args)
+
+# 10-fold cross validation
+    # data = pd.read_excel('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/data_less.xlsx')
+    # data_clean = clean_data_frame(data)
+    # data_clean = clean_hla(data_clean)
+    # data_clean = convert_hla(data_clean)
+    # hla_seq = read_hla('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/hla_seq/hla_seq.txt')
+    # inventory = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/imgt_contact/inventory.txt',sep='\n',header=None)[0].tolist() 
+    # dic_inventory = dict_inventory(inventory)   
+    # data_whole = get_whole_seq('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/imgt_contact',data_clean)   
+    # data_torch = MyDataSet(data_whole)
+    # print('length:',len(data_torch))
+
+    # d1,d2,d3,d4,d5,d6,d7,d8,d9,d10 = random_split(data_torch,[4000,4000,4000,4000,4000,4000,4000,4000,4000,4225])
+
+    # chunk = np.array([d1,d2,d3,d4,d5,d6,d7,d8,d9,d10])
+    # for i in range(10):
+    #     training_chunks = np.delete(chunk,[i])
+    #     testing_chunk = chunk[i]   # Dataset, 1-fold
+    #     training_set = ConcatDataset(training_chunks.tolist())   # Dataset, 9-fold
             
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    #     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Starting to work
-    # data_torch_training_loader = DataLoader(training_set,batch_size=512,shuffle=True,drop_last=True)
-    # data_torch_testing_loader = DataLoader(testing_set,batch_size=512,shuffle=True,drop_last=True)
-    
-    data_torch_training_loader = balancedBinaryLoader(training_set,batch_size=64)
+    #     data_torch_training_loader = balancedBinaryLoader(training_set,batch_size=512)
     
     
-    model = dilated_CNN(data_torch.max_length)
+    #     model = dilated_CNN(data_torch.max_length).to(device)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    scheduler = scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, factor=0.1, patience=2, verbose=True)
-    # if it observe a non-decreasing loss, give you another (patience-1) more chances, if still not decrease, will reduce 
-    # learning rate to factor*learning rate
-    loss_f=nn.CrossEntropyLoss()
+    #     optimizer = torch.optim.Adam(model.parameters(), lr=0.001,weight_decay = 0.0001)
+    #     scheduler = scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #          optimizer, factor=0.1, patience=2, verbose=True)
+    #     loss_f=nn.CrossEntropyLoss()
 
     
-    num_epochs = 5
-    for epoch in range(num_epochs):
-        loss_list = []
-        acc_list = []
-        for i in data_torch_training_loader:
+    #     num_epochs = 80
+    #     for epoch in range(num_epochs):
+    #         loss_list = []
+    #         acc_list = []
+    #         for i in data_torch_training_loader:
 
 
-            X = i[0].unsqueeze(1).float().to(device)
-            y = i[1].long().to(device)
-            #print(X.size(),y,size())
-            optimizer.zero_grad()
-            
-            y_pred = model(X)
-            loss = loss_f(y_pred,y)
-            loss.backward()
-            optimizer.step()
-            loss_list.append(loss.item())
-            
-            num_correct = 0
-            num_samples = 0
-            _,predictions = y_pred.max(1)
+    #             X = i[0].unsqueeze(1).float().to(device)
+    #             y = i[1].long().to(device)
+    #             #print(X.size(),y,size())
+    #             optimizer.zero_grad()
+                
+    #             y_pred = model(X)
+    #             loss = loss_f(y_pred,y)
+    #             loss.backward()
+    #             optimizer.step()
+    #             loss_list.append(loss.item())
+                
+    #             num_correct = 0
+    #             num_samples = 0
+    #             _,predictions = y_pred.max(1)
 
-            num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+    #             num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
 
-            num_samples  += predictions.size(0)
+    #             num_samples  += predictions.size(0)
 
-            acc_list.append(float(num_correct)/float(num_samples)*100)
-            
-        loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
-    
-        scheduler.step(loss)
-        print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
+    #             acc_list.append(float(num_correct)/float(num_samples)*100)
+                
+    #         loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
+        
+    #         scheduler.step(loss)
+    #         print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
+        
+    #     # then test in one-fold
+    #     print('Then start to evaluate...')
+
+    #     data_torch_testing_loader = DataLoader(testing_chunk,batch_size=4000,shuffle=True,drop_last=True)
+        
+    #     model.eval()
+    #     with torch.no_grad():
+    #         for i,(x,y) in enumerate(data_torch_testing_loader):
+
+    #             x = x.unsqueeze(1).float().to(device)
+    #             y = y.long().to(device)
+    #             y_pred = model(x)
+    #             print(y_pred)
+                
+    #             num_correct = 0
+    #             num_samples = 0
+    #             _,predictions = y_pred.max(1)
+    #             print('Predicted:',predictions)
+    #             print('True:',y)
+
+    #             num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+
+    #             num_samples  += predictions.size(0)
+
+    #             print('Accuracy:',float(num_correct)/float(num_samples)*100)
+
+
+
         
         
                 

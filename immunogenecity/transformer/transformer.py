@@ -8,9 +8,15 @@ Created on Wed Aug 12 21:17:34 2020
 import os
 import torch
 import torch.nn as nn
-from utils import dict_inventory,rescue_unknown_hla,dataset
+from utils import dict_inventory,rescue_unknown_hla,dataset,balancedBinaryLoader
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader, random_split,Subset
+import shelve
+from skorch import NeuralNet,NeuralNetClassifier
+import skorch
+import numpy as np
+from sklearn.model_selection import GridSearchCV
+
 
 
 class SelfAttention(nn.Module):
@@ -91,7 +97,7 @@ class TransformerBlock(nn.Module):
         return out
 
 class Encoder(nn.Module):
-    def __init__(self,seq_len,embed_size,num_layers,heads,forward_expansion,dropout,max_length):
+    def __init__(self,seq_len,embed_size,num_layers,heads,forward_expansion,dropout,max_length,hidden):
         super(Encoder,self).__init__()
         self.embed_size = embed_size
         self.position_embedding = nn.Embedding(max_length,embed_size)
@@ -100,23 +106,36 @@ class Encoder(nn.Module):
             )
 
         self.dropout = nn.Dropout(dropout)
-        self.fc_final = nn.Linear(embed_size*seq_len,2)
+        self.fc_final = nn.Sequential(
+            nn.Linear(embed_size*seq_len,self.hidden),
+            nn.Dropout(dropout),
+            nn.ReLU(),
+            nn.Linear(self.hidden,2),
+            )
+        self.sigmoid = nn.Sigmoid()
         
-    def forward(self,x,mask):
+    def forward(self,x):
         # x [batch,seq_len,embed_size]
+        #print(x.size())
+        mask = None
         batch,seq_len = x.shape[0],x.shape[1]
         positions = torch.arange(0,seq_len).expand(batch,seq_len).to(device)  # [batch,seq_len], entry is the indices
         out = self.dropout(x + self.position_embedding(positions))
+        #print(out.size())
         for layer in self.layers:
             out = layer(out,out,out,mask)
         
+        #print(out.size())
         out = out.reshape(out.shape[0],-1)
+        #print(out.size())
         out = self.fc_final(out)
+        out = self.sigmoid(out)
         
         return out   # [batch,2]
             
         
-        
+
+                
 
 
         
@@ -130,59 +149,168 @@ class Encoder(nn.Module):
 # y2 = model_all(a,None)
 
 if __name__ == '__main__':
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training.txt',sep='\t')
+    # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable.txt',sep='\t',header=None,names=['hla','paratope'])
+    # inventory = hla['hla']
+    # dic_inventory = dict_inventory(inventory)
+    # training_dataset = dataset(ori,hla,dic_inventory)
+    # max_length = training_dataset.max_length
     
-    ori = pd.read_csv('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/data/data_new.txt',sep='\t')
-    hla = pd.read_csv('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/hla2paratopeTable.txt',sep='\t',header=None,names=['hla','paratope'])
+    
+    # net = NeuralNetClassifier(
+    #     # dataset=uninitialized torch.Dataset
+    #     # iterator_train=uninitialized torch.DataLoader
+    #     # iterator_valid=uninitialized torch.DataLoader
+    #     module=Encoder,
+    #     module__seq_len=max_length,
+    #     module__embed_size=20,
+    #     module__num_layers=6,
+    #     module__heads=1,
+    #     module__forward_expansion=4,
+    #     module__dropout=0.1,
+    #     module__max_length=max_length,
+    #     iterator_train__batch_size=512,
+    #     iterator_train__shuffle=True,
+    #     train_split=skorch.dataset.CVSplit(10),
+    #     device = device,
+    #     optimizer=torch.optim.Adam,
+    #     optimizer__lr=0.0001,
+    #     criterion=nn.CrossEntropyLoss,
+    #     max_epochs=20,
+
+    #     )    
+    
+    
+
+    
+    # X = torch.stack([item[0] for item in training_dataset],dim=0)  # x [N,seq_len,20]
+        
+    # y = torch.stack([item[1] for item in training_dataset],dim=0)   # y: [N], 1d
+    # # net.fit(X,y)
+    # # predictions = net.predict(X)
+    
+    # # GridSearchCV
+    # params = {
+    #     'module__forward_expansion':[4,8,12],
+    #     'module__num_layers':[6,10,14],
+    #     'module_dropout': [0,0.1],
+    #     'iterator_train__batch_size':[32,128,512,1024],
+    #     'optimizer__lr':[0.01,0.001,0.0001],
+    #     }
+    # gs = GridSearchCV(net, params, refit=False, scoring='accuracy')
+    # gs.fit(X,y)
+    # print(gs.best_score_, gs.best_params_)
+
+
+
+
+
+
+
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/ineo_testing_new.txt',sep='\t')
+    hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable.txt',sep='\t',header=None,names=['hla','paratope'])
     inventory = hla['hla']
     dic_inventory = dict_inventory(inventory)
-    
-    training_dataset = dataset(ori,hla,dic_inventory)
-    max_length = training_dataset.max_length
-    
-    training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=True)
-    
-    model = Encoder(max_length,20,6,1,4,0.1,max_length).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    scheduler = scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, factor=0.1, patience=2, verbose=True)
-    # if it observe a non-decreasing loss, give you another (patience-1) more chances, if still not decrease, will reduce 
-    # learning rate to factor*learning rate
-    loss_f=nn.CrossEntropyLoss()
-    
-    
-    num_epochs = 3
-    for epoch in range(num_epochs):
-        loss_list = []
-        acc_list = []
-        for _,(X,y) in enumerate(training_loader):
-    
-    
-            X = X.to(device)   # [batch,seq_len,20]
-            y = y.to(device)   # [batch]
-            #print(X.size(),y,size())
-            optimizer.zero_grad()
-            
-            y_pred = model(X,None)
-            loss = loss_f(y_pred,y)
-            loss.backward()
-            optimizer.step()
-            loss_list.append(loss.item())
+    testing_dataset = dataset(ori,hla,dic_inventory)
+    max_length = 50
+    testing_loader = DataLoader(testing_dataset,batch_size=662,shuffle=True,drop_last=True)
+    model = Encoder(max_length,20,12,1,8,0,max_length).to(device)
+    model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/epoch100_filter15_iedb_copeunderfit.pth'))
+
+    model.eval()
+    with torch.no_grad():
+        for i,(X,y) in enumerate(testing_loader):
+
+            x = X.to(device)
+            y = y.to(device)
+            y_pred = model(x)
+            print(y_pred)
             
             num_correct = 0
             num_samples = 0
             _,predictions = y_pred.max(1)
-    
+            print('Predicted:',predictions)
+            print('True:',y)
+
             num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
-    
+
             num_samples  += predictions.size(0)
+
+            print('Accuracy:',float(num_correct)/float(num_samples)*100)
+
+            # y_pred_post = y_pred.detach().cpu().numpy()
+            # y_post = y.detach().cpu().numpy()
+
+
+            s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/testing/testing11')
+            s['y_pred'] = y_pred.detach().cpu().numpy()
+            s['predictions'] = predictions.detach().cpu().numpy()
+            s['y'] = y.detach().cpu().numpy()
+            s.close()
+
+
+    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training.txt',sep='\t')
+    # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable.txt',sep='\t',header=None,names=['hla','paratope'])
+    # inventory = hla['hla']
+    # dic_inventory = dict_inventory(inventory)
     
-            acc_list.append(float(num_correct)/float(num_samples)*100)
+    # training_dataset = dataset(ori,hla,dic_inventory)
+    # max_length = training_dataset.max_length
+    
+    # training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=False)
+    # #training_loader = balancedBinaryLoader(training_dataset,batch_size=512)
+    
+    # model = Encoder(max_length,20,12,1,10,0,max_length).to(device)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    # scheduler = scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer, factor=0.5, patience=100, verbose=True)
+    # # if it observe a non-decreasing loss, give you another (patience-1) more chances, if still not decrease, will reduce 
+    # # learning rate to factor*learning rate
+    # loss_f=nn.CrossEntropyLoss()
+    
+    
+    # num_epochs = 300
+    # for epoch in range(num_epochs):
+    #     loss_list = []
+    #     acc_list = []
+    #     # for _,(X,y) in enumerate(training_loader):
+    
+    
+    #     #     X = X.to(device)   # [batch,seq_len,20]
+    #     #     y = y.to(device)   # [batch]
+    #     for i in training_loader:
+    #         X = i[0].to(device)
+    #         y = i[1].to(device)
+    #         optimizer.zero_grad()
             
-        loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
+    #         y_pred = model(X,None)
+    #         loss = loss_f(y_pred,y)
+    #         loss.backward()
+    #         optimizer.step()
+    #         loss_list.append(loss.item())
+            
+    #         num_correct = 0
+    #         num_samples = 0
+    #         _,predictions = y_pred.max(1)
     
-        scheduler.step(loss)
-        print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
+    #         num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+    
+    #         num_samples  += predictions.size(0)
+    
+    #         acc_list.append(float(num_correct)/float(num_samples)*100)
+            
+    #     loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
+    
+    #     scheduler.step(loss)
+    #     print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
+
+    # torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/bigger_model.pth')
     
 
 

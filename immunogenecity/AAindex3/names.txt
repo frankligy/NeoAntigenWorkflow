@@ -1,0 +1,47 @@
+D Statistical contact potential derived from 25 x-ray protein structures
+D Number of contacts between side chains derived from 25 x-ray protein structures
+D Interaction energies derived from side chain contacts in the interiors of
+D Distance-dependent statistical potential (only energies of contacts within
+D Mixed quasichemical and optimization-based protein contact potential
+D Statistical potential derived by the maximization of the harmonic mean of Z
+D Statistical potential derived by the maximization of the perceptron criterion
+D Optimization-based potential derived by the modified perceptron criterion
+D Quasichemical energy of transfer of amino acids from water to the protein
+D Quasichemical energy of interactions in an average buried environment
+D Quasichemical energy of transfer of amino acids from water to the protein
+D Quasichemical energy of interactions in an average buried environment
+D Number of contacts between side chains derived from 1168 x-ray protein
+D Quasichemical energy of transfer of amino acids from water to the protein
+D Quasichemical energy of interactions in an average buried environment
+D Modified version of the Miyazawa-Jernigan transfer energy
+D Quasichemical transfer energy derived from interfacial regions of
+D Quasichemical energy in an average protein environment derived from interfacial
+D Quasichemical potential derived from interfacial regions of protein-protein
+D Modified version of the Miyazawa-Jernigan transfer energy
+D Optimization-derived potential obtained for small set of decoys
+D Optimization-derived potential obtained for large set of decoys
+D Statistical contact potential derived by the quasichemical approximation
+D Modified version of the Miyazawa-Jernigan transfer energy
+D Statistical potential derived by the quasichemical approximation
+D Quasichemical statistical potential derived from  buried contacts
+D Statistical potential derived by the quasichemical approximation
+D Statistical quasichemical potential with the partially composition-corrected
+D Statistical quasichemical potential with the composition-corrected pair scale
+D Quasichemical statistical potential for the antiparallel orientation of
+D Quasichemical statistical potential for the intermediate orientation of
+D Quasichemical statistical potential for the parallel orientation of interacting
+D Distances between centers of interacting side chains in the antiparallel
+D Distances between centers of interacting side chains in the intermediate
+D Distances between centers of interacting side chains in the parallel
+D Optimization-derived potential
+D Distance-dependent statistical potential (contacts within 0-5 Angstrooms)
+D Distance-dependent statistical potential (contacts within 5-7.5 Angstrooms)
+D Distance-dependent statistical potential (contacts within 7.5-10 Angstrooms)
+D Distance-dependent statistical potential (contacts within 10-12 Angstrooms)
+D Distance-dependent statistical potential (contacts longer than 12 Angstrooms)
+D Environment-dependent residue contact energies (rows = helix, cols = helix)
+D Environment-dependent residue contact energies (rows = helix, cols = strand)
+D Environment-dependent residue contact energies (rows = helix, cols = coil)
+D Environment-dependent residue contact energies (rows = strand, cols = strand)
+D Environment-dependent residue contact energies (rows = strand, cols = coil)
+D Environment-dependent residue contact energies (rows = coil, cols = coil)

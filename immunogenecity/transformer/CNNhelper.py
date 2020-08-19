@@ -21,7 +21,7 @@ from sklearn.model_selection import GridSearchCV
 
 
 class CNN(nn.Module):
-    def __init__(self,height=14,width=46,channel=25,hidden=128,p=0.4):
+    def __init__(self,height=10,width=46,channel=25,hidden=128,p=0.4):
         super(CNN,self).__init__()
         self.height = height
         self.width = width
@@ -42,20 +42,20 @@ class CNN(nn.Module):
         layer1_maxpool2d_output_W = CNN.calculate_conv2d_dimension(layer1_conv2d_output_W,3,stride=3)
         
         self.layer2 = nn.Sequential(
-            nn.Conv2d(32,64,kernel_size=(5,4)),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(32,32,kernel_size=(2,4)),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d((1,2)),
             )
         
-        layer2_conv2d_output_H = CNN.calculate_conv2d_dimension(layer1_maxpool2d_output_H,5)
+        layer2_conv2d_output_H = CNN.calculate_conv2d_dimension(layer1_maxpool2d_output_H,2)
         layer2_conv2d_output_W = CNN.calculate_conv2d_dimension(layer1_maxpool2d_output_W,4)
         layer2_maxpool2d_output_H = CNN.calculate_conv2d_dimension(layer2_conv2d_output_H,1,stride=1)
         layer2_maxpool2d_output_W = CNN.calculate_conv2d_dimension(layer2_conv2d_output_W,2,stride=2)
         
         self.layer3 = nn.Sequential(
             nn.Dropout(self.p),
-            nn.Linear(64 * layer2_maxpool2d_output_H * layer2_maxpool2d_output_W, self.hidden),
+            nn.Linear(32 * layer2_maxpool2d_output_H * layer2_maxpool2d_output_W,self.hidden),
             nn.Dropout(self.p),
             nn.ReLU(),
             nn.Linear(self.hidden,2),
@@ -97,21 +97,54 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-    ori = pd.read_csv('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/data/shuffle_training.txt',sep='\t')
-    hla = pd.read_csv('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
+    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training_test.txt',sep='\t')
+    hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
     inventory = hla['hla']
     dic_inventory = dict_inventory(inventory)
     
     index = wrapper_preprocess()
     training_dataset = CNN_dataset(ori, hla, dic_inventory, index)
+    print(training_dataset[1][0].size())
     
-    # modelObj,training_dataset,optimizer,criterion,batch_size,num_epochs,outdir
+    model = CNN().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
-    batch_size = 512
-    num_epochs = 5
-    outdir = '/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/transformer/test.pth'
-    pytorch_training(CNN, training_dataset, optimizer, criterion, batch_size, num_epochs, outdir)
+
+
+    training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=False)
+
+    num_epochs = 50
+    for epoch in range(num_epochs):
+        loss_list = []
+        acc_list = []
+        for i in training_loader:
+            X = i[0].to(device)
+            y = i[1].to(device)
+            optimizer.zero_grad()
+            
+            y_pred = model(X)
+            print(y_pred)
+            loss = criterion(y_pred,y)
+            loss.backward()
+            optimizer.step()
+            loss_list.append(loss.item())
+            
+            num_correct = 0
+            num_samples = 0
+            _,predictions = y_pred.max(1)
+            print(predictions)
+            print(y)
+    
+            num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+    
+            num_samples  += predictions.size(0)
+    
+            acc_list.append(float(num_correct)/float(num_samples)*100)
+            
+        loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
+    
+
+        print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
     
     
     

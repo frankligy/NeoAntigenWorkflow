@@ -225,7 +225,8 @@ class dataset(Dataset):
         
         self.paratope_dic()
         self.middle =  self.convert()
-        self.new = self.padding()
+        #self.new = self.padding()
+        self.new = self.padding_oneside()
         #self.new = self.padding_onehot()
         
     def __len__(self):
@@ -297,7 +298,26 @@ class dataset(Dataset):
         
         return bucket
 
+    def padding_oneside(self):
+        len_values = [tup[0].shape[0] for tup in self.middle]
+        #max_length = max(len_values)  
+        max_length = 56      
+        # padding
+        bucket = []
+        for item in self.middle:
 
+            length = item[0].shape[0]
+            gap = max_length - length
+                    
+
+            padding_right = torch.empty([gap,21]).fill_(-1.0)
+            final = torch.cat([item[0],padding_right],dim=0)
+            bucket.append((final,item[1])) 
+
+        
+        self.max_length = max_length
+        
+        return bucket
 
     def paratope_dic(self):
         df = self.hla
@@ -329,7 +349,27 @@ class dataset(Dataset):
             encoded[i,:] = onehot[:,amino.index(peptide[i])]
         return encoded
 
+    @staticmethod
+    def blosum50_new(peptide):
+        amino = 'ARNDCQEGHILKMFPSTWYV-'
+        dic = MatrixInfo.blosum50
+        matrix = np.zeros([21,21])
+        for i in range(matrix.shape[0]):
+            for j in range(matrix.shape[1]):
+                try:
+                    matrix[i,j] = dic[(amino[i],amino[j])] 
+                except KeyError:
+                    try:
+                        matrix[i,j] = dic[(amino[j],amino[i])]
+                    except:
+                        matrix[i,j] = -1
+                    
+        encoded = torch.empty([len(peptide),21])       # (seq_len,21)       
+        for i in range(len(peptide)):
 
+            encoded[i,:] = torch.from_numpy(matrix[:,amino.index(peptide[i])])
+                
+        return encoded
 
 
     @staticmethod
@@ -366,7 +406,7 @@ class dataset(Dataset):
                 cat = self.dic[hla_type] + peptide
             cat = cat.upper()
             if 'X' in cat: continue
-            X = dataset.blosum50(cat).float()   # 2-d tensor
+            X = dataset.blosum50_new(cat).float()   # 2-d tensor
             #X = dataset.onehot_classic(cat).float()
             y = torch.tensor(immuno).long()  # 0-d tensor
             lis.append((X,y))
@@ -589,7 +629,7 @@ def convert_all_index_before_pca():
     for i in range(47):
         if not i in [42,43,45]:
             if not i in [2,22,23,25]:  # Glu is not available, NA, just discard for now
-                index=impute_triangle('/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/AAindex3/index{0}.txt'.format(i))
+                index=impute_triangle('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/AAindex3/index{0}.txt'.format(i))
                 frame=extract_pair_metircs(index)
                 array.append(frame)
     result = np.concatenate(array,axis=1)
@@ -726,7 +766,7 @@ class CNN_dataset(Dataset):
         '''
         final = []
         for row in range(df.shape[0]):
-            print(row)
+            #print(row)
             peptide = df['peptide'].iloc[row]
             hla_type = df['HLA'].iloc[row]
             try:
@@ -763,15 +803,15 @@ class CNN_dataset(Dataset):
                     hla_index = j
                     hla_aa = hla_seq[hla_index]
                     if i in gap_left_indices or i in gap_right_indices:
-                        result[:,i,j] = torch.empty(25).fill_(0.0).float()
+                        result[:,i,j] = torch.empty(25).fill_(0.005).float()
 
                     elif hla_aa == '-':
-                        result[:,i,j] = torch.empty(25).fill_(0.0).float()
+                        result[:,i,j] = torch.empty(25).fill_(0.005).float()
                     else:
                         real_peptide_index = i - gap_left  # say the i=4, [0,1,2] is gapped, 4-3=1, the second aa in peptide
                         real_peptide = peptide[real_peptide_index]
                         if real_peptide == 'X':
-                            result[:,i,j] = torch.empty(25).fill_(0.0).float()
+                            result[:,i,j] = torch.empty(25).fill_(0.005).float()
                         else:
                             
 
@@ -831,7 +871,94 @@ def pytorch_training(modelObj,training_dataset,optimizer,criterion,batch_size,nu
                     
             
             
+###########################################################################################################################
+# FChelper dataset
+class FC_dataset(Dataset):
+    def __init__(self,ori,hla,dic_inventory,index):   #index [210, 25] matrix
+        self.ori = ori
+        self.hla = hla
+        self.dic_inventory = dic_inventory
+        self.index = index
+
+        self.paratope_dic()
+        self.new = self.convert() # [     (tensor: [10*46*25=11500] - 1-d tensor, tensor:[] - 0-d tensor), (), ()             ]
+
+    def __len__(self):
+        return len(self.new)
+
+    def __getitem__(self,index):
+        return self.new[index]
+
+    def paratope_dic(self):
+        df = self.hla
+        self.dic = {}
+        for i in range(df.shape[0]):
+            hla = df['hla'].iloc[i]
+            paratope = df['paratope'].iloc[i]
+            self.dic[hla] = paratope
+
+    def get_index_value(self,tup): # input will be a tuple (a,b), a, b will be the amino acid one letter character like ('D','Q')
+        amino = 'ARNDCQEGHILKMFPSTWYV'
+        first = amino.index(tup[0].upper())
+        second = amino.index(tup[1].upper())
+        if first < second: 
+            first,second = second,first  # first will be row index, second will be column index in [20*20] matrix
+        row_index = sum_to_itself(first) + second  # the row index in [210,25] matrix
+        values = self.index[row_index,:]
+        return values   # 1d numpy array
+
+
+    def convert(self):
+        df = self.ori
+        peptides = df['peptide']
+        self.pep_max = max([len(pep) for pep in peptides])
+        self.hla_max = 46
+        self.components = 25
+
+        final = []
+        for row in range(df.shape[0]):
+            #print(row)
+            peptide = df['peptide'].iloc[row]
+            hla_type = df['HLA'].iloc[row]
+            try:
+                hla_seq = self.dic[hla_type]
+            except KeyError:
+                hla_type = rescue_unknown_hla(hla_type,self.dic_inventory)
+                hla_seq = self.dic[hla_type]
             
+            immuno = df['immunogenecity'].iloc[row]
+            y = torch.tensor(immuno).long()
+
+            pep_len = len(peptide)
+            diff_len = self.pep_max - pep_len
+            gap = diff_len    # either be 0 or 1
+            gap_indices = list(range(gap))  # either [] or [0]
+
+            result = torch.tensor([]).float()
+            for i in range(self.pep_max):
+                for j in range(self.hla_max):
+
+                    if i in gap_indices or peptide[i-gap] == 'X' or hla_seq[j] == '-':
+                        patch = torch.empty([25]).fill_(0.005).float()
+                        result = torch.cat([result,patch],dim=0)
+                        
+                    else:
+                        p = peptide[i-gap]
+                        h = hla_seq[j]
+
+                        patch = torch.from_numpy(self.get_index_value((p,h))).float()
+
+                        result = torch.cat([result,patch],dim=0)
+            #print(result[1200:1300])
+            final.append((result,y))
+                
+        return final   # [    (tensor:[11500],tesnor:[]),(),()    
+
+
+
+
+
+
             
             
             

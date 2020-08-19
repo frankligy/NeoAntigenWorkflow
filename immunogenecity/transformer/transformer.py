@@ -97,7 +97,7 @@ class TransformerBlock(nn.Module):
         return out
 
 class Encoder(nn.Module):
-    def __init__(self,seq_len,embed_size,num_layers,heads,forward_expansion,dropout,max_length,hidden):
+    def __init__(self,seq_len,embed_size,num_layers,heads,forward_expansion,dropout,max_length):
         super(Encoder,self).__init__()
         self.embed_size = embed_size
         self.position_embedding = nn.Embedding(max_length,embed_size)
@@ -106,16 +106,12 @@ class Encoder(nn.Module):
             )
 
         self.dropout = nn.Dropout(dropout)
-        self.fc_final = nn.Sequential(
-            nn.Linear(embed_size*seq_len,self.hidden),
-            nn.Dropout(dropout),
-            nn.ReLU(),
-            nn.Linear(self.hidden,2),
-            )
+        self.fc = nn.Linear(embed_size*seq_len,2)
+
         self.sigmoid = nn.Sigmoid()
         
-    def forward(self,x):
-        # x [batch,seq_len,embed_size]
+    def forward(self,x):          # x [batch,seq_len,embed_size]
+ 
         #print(x.size())
         mask = None
         batch,seq_len = x.shape[0],x.shape[1]
@@ -128,7 +124,7 @@ class Encoder(nn.Module):
         #print(out.size())
         out = out.reshape(out.shape[0],-1)
         #print(out.size())
-        out = self.fc_final(out)
+        out = self.fc(out)
         out = self.sigmoid(out)
         
         return out   # [batch,2]
@@ -138,15 +134,6 @@ class Encoder(nn.Module):
                 
 
 
-        
-# model = SelfAttention(21,1) 
-# model_tran = TransformerBlock(21, 1, 0.1, 4)
-# y = model(a,a,a,None)   
-# y1 = model_tran(y,y,y,None)
-
-# model_all = Encoder(79,21,6,1,4,0.1,79).to(device)
-# a = torch.rand([64,79,21]).to(device)
-# y2 = model_all(a,None)
 
 if __name__ == '__main__':
 
@@ -213,15 +200,15 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/ineo_testing_new.txt',sep='\t')
-    hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable.txt',sep='\t',header=None,names=['hla','paratope'])
+    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_validation_filter910.txt',sep='\t')
+    hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
     inventory = hla['hla']
     dic_inventory = dict_inventory(inventory)
     testing_dataset = dataset(ori,hla,dic_inventory)
-    max_length = 50
-    testing_loader = DataLoader(testing_dataset,batch_size=662,shuffle=True,drop_last=True)
-    model = Encoder(max_length,20,12,1,8,0,max_length).to(device)
-    model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/epoch100_filter15_iedb_copeunderfit.pth'))
+    max_length = 56
+    testing_loader = DataLoader(testing_dataset,batch_size=3279,shuffle=True,drop_last=True)
+    model = Encoder(max_length,21,12,1,10,0,max_length).to(device)
+    model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/restrict10.pth'))
 
     model.eval()
     with torch.no_grad():
@@ -248,15 +235,15 @@ if __name__ == '__main__':
             # y_post = y.detach().cpu().numpy()
 
 
-            s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/testing/testing11')
+            s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/testing/testing14')
             s['y_pred'] = y_pred.detach().cpu().numpy()
             s['predictions'] = predictions.detach().cpu().numpy()
             s['y'] = y.detach().cpu().numpy()
             s.close()
 
-
-    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training.txt',sep='\t')
-    # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable.txt',sep='\t',header=None,names=['hla','paratope'])
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training_test.txt',sep='\t')
+    # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
     # inventory = hla['hla']
     # dic_inventory = dict_inventory(inventory)
     
@@ -266,30 +253,21 @@ if __name__ == '__main__':
     # training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=False)
     # #training_loader = balancedBinaryLoader(training_dataset,batch_size=512)
     
-    # model = Encoder(max_length,20,12,1,10,0,max_length).to(device)
+    # model = Encoder(max_length,21,12,1,10,0,max_length).to(device)
     # optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    # scheduler = scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    #     optimizer, factor=0.5, patience=100, verbose=True)
-    # # if it observe a non-decreasing loss, give you another (patience-1) more chances, if still not decrease, will reduce 
-    # # learning rate to factor*learning rate
     # loss_f=nn.CrossEntropyLoss()
     
     
-    # num_epochs = 300
+    # num_epochs = 150
     # for epoch in range(num_epochs):
     #     loss_list = []
     #     acc_list = []
-    #     # for _,(X,y) in enumerate(training_loader):
-    
-    
-    #     #     X = X.to(device)   # [batch,seq_len,20]
-    #     #     y = y.to(device)   # [batch]
     #     for i in training_loader:
     #         X = i[0].to(device)
     #         y = i[1].to(device)
     #         optimizer.zero_grad()
             
-    #         y_pred = model(X,None)
+    #         y_pred = model(X)
     #         loss = loss_f(y_pred,y)
     #         loss.backward()
     #         optimizer.step()
@@ -307,10 +285,10 @@ if __name__ == '__main__':
             
     #     loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
     
-    #     scheduler.step(loss)
+
     #     print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
 
-    # torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/bigger_model.pth')
+    # torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/restrict10.pth')
     
 
 

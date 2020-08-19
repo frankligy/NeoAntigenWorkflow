@@ -17,28 +17,30 @@ import pandas as pd
 
 
 
-s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing12')
+s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing13')
 y_pred = s['y_pred']
 predictions = s['predictions']
-y = s['y']
+y_mine = s['y']
 
-confusion_matrix(y,predictions)
-f1_score(y,predictions)
-
-
+confusion_matrix(y_mine,predictions)
+f1_score(y_mine,predictions)
 
 
+
+diff = y_pred[:,1] - y_pred[:,0]
 
 
 
 
 
 # draw ROC curve
-fpr,tpr,_ = roc_curve(y,y_pred[:,1],pos_label=1)
-area = auc(fpr,tpr)
+fpr_mine,tpr_mine,_ = roc_curve(y_mine,diff,pos_label=1)
+area_mine = auc(fpr_mine,tpr_mine)
 fig = plt.figure()
 lw = 2
-plt.plot(fpr, tpr, color='darkorange',
+plt.plot(fpr_mine, tpr_mine, color='darkorange',
+         lw=lw, label='ROC curve (area = %0.2f)' % area_mine)
+plt.plot(fpr, tpr, color='black',
          lw=lw, label='ROC curve (area = %0.2f)' % area)
 plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
 plt.xlim([0.0, 1.0])
@@ -48,12 +50,12 @@ plt.ylabel('True Positive Rate')
 plt.title('Receiver operating characteristic example')
 plt.legend(loc="lower right")
 plt.show()
-#fig.savefig('/Users/ligk2e/Desktop/immunogenecity/roc.svg')
+fig.savefig('/Users/ligk2e/Desktop/immunogenecity/comp.svg')
 
 # draw PR curve
-precision,recall,_ = precision_recall_curve(y,y_pred[:,1],pos_label=1)
+precision,recall,_ = precision_recall_curve(y_mine,diff,pos_label=1)
 area_PR = auc(recall,precision)
-baseline = np.sum(np.array(y) == 1) / len(y)
+baseline = np.sum(np.array(y_mine) == 1) / len(y_mine)
 
 plt.figure()
 lw = 2
@@ -224,8 +226,8 @@ plt.show()
 
 
 #new dataset with deephlapan
-df1 = pd.read_csv('/Users/ligk2e/Desktop/immunogenecity/shuffle_testing.txt',sep='\t')
-df2 = pd.read_csv('/Users/ligk2e/Desktop/immunogenecity/shuffle_testing_final_predicted_result.csv')
+df1 = pd.read_csv('/Users/ligk2e/Desktop/immunogenecity/ineo_testing_new.txt',sep='\t')
+df2 = pd.read_csv('/Users/ligk2e/Desktop/immunogenecity/ineo_testing_new_final_predicted_result.csv')
 y=df1['immunogenecity'].values
 y_pred=df2['immunogenic score'].values
 
@@ -235,6 +237,8 @@ counter = 0
 for i in range(len(y)):
     if y[i] == hard_y[i]: counter += 1
 
+confusion_matrix(y,hard_y)
+f1_score(y,hard_y)
 # accuracy 58.92%
 
 # draw ROC curve
@@ -242,7 +246,7 @@ fpr,tpr,_ = roc_curve(y,y_pred,pos_label=1)
 area = auc(fpr,tpr)
 plt.figure()
 lw = 2
-plt.plot(fpr, tpr, color='darkorange',
+plt.plot(fpr, tpr, color='black',
          lw=lw, label='ROC curve (area = %0.2f)' % area)
 plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
 plt.xlim([0.0, 1.0])

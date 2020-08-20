@@ -17,7 +17,7 @@ import pandas as pd
 
 
 
-s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing13')
+s = shelve.open('/Users/ligk2e/Desktop/immunogenecity/testing15')
 y_pred = s['y_pred']
 predictions = s['predictions']
 y_mine = s['y']
@@ -40,8 +40,6 @@ fig = plt.figure()
 lw = 2
 plt.plot(fpr_mine, tpr_mine, color='darkorange',
          lw=lw, label='ROC curve (area = %0.2f)' % area_mine)
-plt.plot(fpr, tpr, color='black',
-         lw=lw, label='ROC curve (area = %0.2f)' % area)
 plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
 plt.xlim([0.0, 1.0])
 plt.ylim([0.0, 1.05])

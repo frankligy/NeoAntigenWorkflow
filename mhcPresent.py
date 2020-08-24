@@ -29,6 +29,15 @@ import subprocess
 from pathos.multiprocessing import ProcessingPool as Pool
 import getopt
 from decimal import Decimal as D
+from mhcflurry import Class1PresentationPredictor
+from dilatedCNN import *
+import itertools
+
+from torch.utils.data import Dataset, DataLoader, random_split,Subset,ConcatDataset
+import torch
+from torch.nn.utils.rnn import pad_sequence
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 
@@ -825,6 +834,119 @@ class NeoJ(Meta):
             col.append(dic)
         self.df['{0}result'.format(mode)]=col
             
+    def MHCflurry(self,HLA,mode,sb=50,wb=500):
+        HLA = HLA.split(',')
+        predictor = Class1PresentationPredictor.load()
+        col1,col2,col3 = [],[],[]
+        for i in range(self.df.shape[0]):
+            merList = self.df['{0}mer'.format(self.mer)].tolist()[i]
+            if merList == ['MANNUAL']: merList = self.df['mannual'].tolist()[i]
+            merList = pre_process(merList)
+            df_result = predictor.predict(peptides=merList,alleles=HLA,verbose=0)
+            dic_result = post_process(df_result,HLA,sb,wb)
+            cond,data,length = is_dict_empty(dic_result)
+            if cond:    
+                col1.append('No candidates')
+                col2.append('No candidates')
+                col3.append('No candidates')
+            else: 
+                col1.append(dic_result)
+                col2.append(data)
+                col3.append(length)
+            
+        self.df['HLAIpresented_dict'] = col1
+        self.df['HLAIpresented_total'] = col2
+        self.df['HLAIpresented_count'] = col3
+
+    def immunogenecity(self,HLA):
+        HLA = HLA.split(',')
+        col = []
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = dilatedCNN().to(device)
+        model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/dilatedCNN_balance.pth',map_location=torch.device('cpu')))
+        for i in range(self.df.shape[0]):
+            merList = self.df['HLAIpresented_total'].iloc[i]
+            if merList == 'No candidates': col.append('No candidates')
+            else:
+ 
+                result = construct_df4deeplearningmodel(merList,HLA,model,device)   # [[merlist1,hla1,diff_value],[merlist1,hla2,diff_value],[]...., [merlist3,hla1,diff_value],.......]
+
+                col.append(result)
+        self.df['immunogenecity']=col
+
+def is_dict_empty(dic_result):
+    data = []
+    for i in dic_result.values():
+        for o in i:
+            data.extend(o)
+    if data: return False, data, len(data)
+    else: return True, data, len(data)
+
+
+def construct_df4deeplearningmodel(merList,HLA,model,device):
+
+    cartesian = list(itertools.product(merList,HLA))   # [(merlist1,hla1),(merlist1,hla2),()...., (merlist3,hla1),.......]
+    col1 = [tup[0] for tup in cartesian]
+    col2 = [tup[1] for tup in cartesian]
+    col3 = [0 for _ in range(len(cartesian))]
+    ori = pd.DataFrame({'peptide':col1,'HLA':col2,'immunogenecity':col3})
+    scoring_dataset = dataset(ori,hla,dic_inventory)
+
+    scoring_loader = DataLoader(scoring_dataset,batch_size=len(cartesian),shuffle=False,drop_last=True)
+
+
+
+    model.eval()
+    with torch.no_grad():
+        for i,(X,y) in enumerate(scoring_loader):
+
+            x = X.unsqueeze(1).permute(0,1,3,2).to(device)
+            y_pred = model(x)
+    diff = y_pred[:,1] - y_pred[:,0]
+    result = fiddle_result(cartesian,diff)
+    return result
+
+
+def fiddle_result(cartesian,diff):
+    diff = diff.numpy()
+    result = []
+    for i in range(len(cartesian)):
+        item = cartesian[i]
+        item = list(item)
+        item.append(diff[i])
+        if diff[i] >=  0:
+            result.append(item)
+    return result
+
+
+    
+
+
+
+
+def pre_process(merList):
+    result = []
+    [result.extend(item) for item in merList if isinstance(item,list)]
+    result = list(set(result))
+    return result
+
+def post_process(df,hla,sb,wb):
+    dic = {}
+    for h in hla:
+        dic[h] = [[],[]]
+    
+    for i in range(df.shape[0]):
+        peptide = df['peptide'].iloc[i]
+        affinity = df['affinity'].iloc[i]
+        HLA = df['best_allele'].iloc[i]
+        if affinity <= sb:    # strong binder
+            dic[HLA][0].append(peptide)
+        elif affinity > sb and affinity <= wb:    # weak binder
+            dic[HLA][1].append(peptide)
+        else:
+            continue
+        
+    return dic
 
 class netMHCpan():
     # ../netMHCpan -p test.pep -BA -xls -a HLA-A01:01,HLA-A02:01 -xlsfile my_NetMHCpan_out.xls
@@ -1724,15 +1846,25 @@ def run(NeoJBaml):
     print('finished mannual check-Process:{0}\n'.format(PID))
 
     if mode == 'Neoantigen':
-        print('starting to deploy netMHCpan-Process:{0}\n'.format(PID))
+        print('starting to deploy binding affinity prediction-Process:{0}\n'.format(PID))
         if MHCmode == 'MHCI':
-            NeoJBaml.netMHCresult(HLA,software,MHCmode)
+            NeoJBaml.MHCflurry(HLA,MHCmode)
         elif MHCmode == 'MHCII':
             NeoJBaml.netMHCresult(HLA,software,MHCmode) 
         print('finished binding affinity prediction-Process:{0}\n'.format(PID))
         return NeoJBaml.df
     elif mode == 'Peptide':
         return NeoJBaml.df   # only get splicing junction peptides
+    elif mode == 'immuno+':
+        print('starting to deploy binding affinity prediction-Process:{0}\n'.format(PID))
+        NeoJBaml.MHCflurry(HLA,MHCmode)
+        print('finished binding affinity prediction-Process:{0}\n'.format(PID))
+        print('starting immunogenecity prediction\n')
+        NeoJBaml.immunogenecity(HLA)
+        print('finishing immunogenecity prediction\n')
+        return NeoJBaml.df
+
+
 
 
 def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,checkGTEx,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
@@ -1744,6 +1876,8 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     global dict_fa
     global dictExonList
     global dictGTF
+    global hla
+    global dic_inventory
     if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName))): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName)))
     if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp')): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp'))
     if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures')): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures'))
@@ -1759,11 +1893,12 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     dictExonList = convertExonList(df_exonlist)
     print('constructing dictGTF file')
     dictGTF = dictGTFconstruct(dataFolder)
+    print('some necessary files for immunogenecity prediction\n')
+    hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
+    inventory = hla['hla']
+    dic_inventory = dict_inventory(inventory)
 
-
-    
-
-        
+  
     if checkGTEx == 'True':
         if os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName))):
             dfNeoJunction = pd.read_csv(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'{0}_neojunction_singleSample_check.txt'.format(taskName)),sep='\t')
@@ -1804,19 +1939,14 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     pool.close()
     pool.join()
     Crystal = pd.concat(df_out_list)   # default is stacking by rows
-    if mode == 'Neoantigen':
-        
-        if MHCmode == 'MHCI':
-            Crystal = Crystal.drop(['exam_seq','exam_whole_transcripts','exam_ORF_tran','exam_ORF_aa','phase'],axis=1)
-            #Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIresult']]
-        elif MHCmode == 'MHCII':
-            Crystal = Crystal.drop(['exam_seq','exam_whole_transcripts','exam_ORF_tran','exam_ORF_aa','phase'],axis=1)
-            #Crystal = Crystal[['UID','PSI','count','peptide','{0}mer'.format(k),'mannual','MHCIIresult']]
-        Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/Neoantigen_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
-
-    elif mode == 'Peptide':
-        Crystal = Crystal.drop(['exam_seq','exam_whole_transcripts','exam_ORF_tran','exam_ORF_aa','phase'],axis=1)
+    Crystal = Crystal.drop(['exam_seq','exam_whole_transcripts','exam_ORF_tran','exam_ORF_aa','phase'],axis=1)
+    if mode == 'Peptide':
         Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/JunctionPeptides_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
+    elif mode == 'Neoantigen':
+        Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/Neoantigen_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
+    elif mode == 'immuno+':
+        Crystal.to_csv(os.path.join(outFolder,'resultMHC_{1}/immuno+_{0}_{1}.txt'.format(k,taskName)),sep='\t',header=True,index = False)
+
     
     endTime = process_time()
     print('Time Usage: {} seconds'.format(endTime-startTime))

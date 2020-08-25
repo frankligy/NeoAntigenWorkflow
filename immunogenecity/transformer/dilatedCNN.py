@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from utils import *
 import shelve
+import itertools
 
 
 
@@ -79,6 +80,9 @@ class dilatedCNN(nn.Module):
 
 
 
+
+
+
 if __name__ == '__main__':
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training_test.txt',sep='\t')
@@ -87,7 +91,8 @@ if __name__ == '__main__':
     # dic_inventory = dict_inventory(inventory)
     # training_dataset = dataset(ori,hla,dic_inventory)
     # max_length = training_dataset.max_length
-    # training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=False)
+    # #training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=False)
+    # training_loader = balancedBinaryLoader(training_dataset,batch_size=512)
     # model = dilatedCNN().to(device)
     # optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
     # loss_f=nn.CrossEntropyLoss()
@@ -123,48 +128,62 @@ if __name__ == '__main__':
     
 
     #     print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
-    # torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/dilatedCNN.pth')
+    #     torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/dilatedCNN_balance.pth')
 
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/ineo_testing_filter910.txt',sep='\t')
+    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_validation_filter910.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910.txt
+    # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
+    # inventory = hla['hla']
+    # dic_inventory = dict_inventory(inventory)
+    # testing_dataset = dataset(ori,hla,dic_inventory)
+    # max_length = 56
+    # testing_loader = DataLoader(testing_dataset,batch_size=3279,shuffle=True,drop_last=True)   # 3279 # 652
+    # model = dilatedCNN().to(device)
+    # model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/dilatedCNN_balance.pth'))
+
+    # model.eval()
+    # with torch.no_grad():
+    #     for i,(X,y) in enumerate(testing_loader):
+
+    #         x = X.unsqueeze(1).permute(0,1,3,2).to(device)
+    #         y = y.to(device)
+    #         y_pred = model(x)
+    #         print(y_pred)
+            
+    #         num_correct = 0
+    #         num_samples = 0
+    #         _,predictions = y_pred.max(1)
+    #         print('Predicted:',predictions)
+    #         print('True:',y)
+
+    #         num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+
+    #         num_samples  += predictions.size(0)
+
+    #         print('Accuracy:',float(num_correct)/float(num_samples)*100)
+
+
+
+
+    #         s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/testing/testing19')
+    #         s['y_pred'] = y_pred.detach().cpu().numpy()
+    #         s['predictions'] = predictions.detach().cpu().numpy()
+    #         s['y'] = y.detach().cpu().numpy()
+    #         s.close()
+
+    # scoring
+
+    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_validation_filter910.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910.txt
     hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
     inventory = hla['hla']
     dic_inventory = dict_inventory(inventory)
-    testing_dataset = dataset(ori,hla,dic_inventory)
-    max_length = 56
-    testing_loader = DataLoader(testing_dataset,batch_size=652,shuffle=True,drop_last=True)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = dilatedCNN().to(device)
-    model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/dilatedCNN.pth'))
-
-    model.eval()
-    with torch.no_grad():
-        for i,(X,y) in enumerate(testing_loader):
-
-            x = X.unsqueeze(1).permute(0,1,3,2).to(device)
-            y = y.to(device)
-            y_pred = model(x)
-            print(y_pred)
-            
-            num_correct = 0
-            num_samples = 0
-            _,predictions = y_pred.max(1)
-            print('Predicted:',predictions)
-            print('True:',y)
-
-            num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
-
-            num_samples  += predictions.size(0)
-
-            print('Accuracy:',float(num_correct)/float(num_samples)*100)
-
-
-
-
-            s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/testing/testing16')
-            s['y_pred'] = y_pred.detach().cpu().numpy()
-            s['predictions'] = predictions.detach().cpu().numpy()
-            s['y'] = y.detach().cpu().numpy()
-            s.close()
+    model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/dilatedCNN_balance.pth'))
+    merList = ['YPALPHDTAI','IPAASQLDL','MPEAMTIVML']
+    HLA = ['HLA-B*3501']
+    result = construct_df4deeplearningmodel(merList,HLA,model,device)
+    print(result)

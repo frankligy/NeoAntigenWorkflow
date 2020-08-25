@@ -12,6 +12,7 @@ from utils import *
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader, random_split,Subset
 import shelve
+import pickle
 from skorch import NeuralNet,NeuralNetClassifier
 import skorch
 import numpy as np
@@ -59,6 +60,8 @@ class SelfAttention(nn.Module):
         
         # attention [batch,heads,seq_len,seq_len]
         attention = torch.softmax(energy / (self.embed_size ** (1/2)), dim=3)
+
+
         
         # out is the product of attention * v, [batch,seq_len,heads,head_dim], then flatten [batch,seq_len,embed_size]
         out = torch.einsum('bhqk,bqhd -> bqhd',[attention,values])  # q is value_len, also query_len since they are the same
@@ -123,13 +126,13 @@ class Encoder(nn.Module):
         batch,seq_len = x.shape[0],x.shape[1]
         positions = torch.arange(0,seq_len).expand(batch,seq_len).to(device)  # [batch,seq_len], entry is the indices
         out = self.dropout(x + self.position_embedding(positions))
-        #print(out.size())
+
         for layer in self.layers:
             out = layer(out,out,out,mask)
         
-        #print(out.size())
+ 
         out = out.reshape(out.shape[0],-1)
-        #print(out.size())
+
         out = self.fc(out)
         out = self.sigmoid(out)
         
@@ -206,15 +209,15 @@ if __name__ == '__main__':
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/ineo_testing_filter910.txt',sep='\t')
+    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/ineo_testing_filter910.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910.txt
     # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
     # inventory = hla['hla']
     # dic_inventory = dict_inventory(inventory)
-    # testing_dataset = dataset_add3(ori,hla,dic_inventory)
+    # testing_dataset = dataset(ori,hla,dic_inventory)
     # max_length = 56
     # testing_loader = DataLoader(testing_dataset,batch_size=652,shuffle=True,drop_last=True)
-    # model = Encoder(max_length,24,12,1,10,0,max_length).to(device)
-    # model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/add3.pth'))
+    # model = Encoder(max_length,21,12,1,10,0,max_length).to(device)
+    # model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/transformer_imbalance.pth'))
 
     # model.eval()
     # with torch.no_grad():
@@ -241,66 +244,80 @@ if __name__ == '__main__':
     #         # y_post = y.detach().cpu().numpy()
 
 
-    #         s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/testing/testing15')
+    #         s = shelve.open('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/testing/testing23')
     #         s['y_pred'] = y_pred.detach().cpu().numpy()
     #         s['predictions'] = predictions.detach().cpu().numpy()
     #         s['y'] = y.detach().cpu().numpy()
     #         s.close()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training_test.txt',sep='\t')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_training_test.txt',sep='\t')
+    # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
+    # inventory = hla['hla']
+    # dic_inventory = dict_inventory(inventory)
+    # #table_scaled = wrapper_read_scaling()
+    # training_dataset = dataset(ori,hla,dic_inventory)
+    # max_length = training_dataset.max_length
+    
+    # #training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=False)
+    # training_loader = balancedBinaryLoader(training_dataset,batch_size = 512)
+
+    
+    # model = Encoder(max_length,21,12,1,10,0,max_length).to(device)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    # loss_f=nn.CrossEntropyLoss()
+    
+    
+    # num_epochs = 50
+    # for epoch in range(num_epochs):
+    #     loss_list = []
+    #     acc_list = []
+    #     for i in training_loader:
+    #         X = i[0].to(device)
+    #         y = i[1].to(device)
+    #         optimizer.zero_grad()
+            
+
+    #         y_pred = model(X)
+    #         loss = loss_f(y_pred,y)
+    #         loss.backward()
+    #         optimizer.step()
+    #         loss_list.append(loss.item())
+            
+    #         num_correct = 0
+    #         num_samples = 0
+    #         _,predictions = y_pred.max(1)
+    #         print(y_pred)
+    #         print(predictions)
+    #         print(y)
+    
+    #         num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
+    
+    #         num_samples  += predictions.size(0)
+    
+    #         acc_list.append(float(num_correct)/float(num_samples)*100)
+            
+    #     loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
+    
+
+    #     print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
+
+    # torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/transformer_balance.pth')
+    
+
+    # scoring
+    ori = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/data/shuffle_validation_filter910.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910.txt
     hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
     inventory = hla['hla']
     dic_inventory = dict_inventory(inventory)
-    table_scaled = wrapper_read_scaling()
-    training_dataset = transformer_enrich(ori,hla,dic_inventory,table_scaled)
-    max_length = training_dataset.max_len
-    
-    training_loader = DataLoader(training_dataset,batch_size=512,shuffle=True,drop_last=False)
-
-    
-    model = Encoder(max_length,553,6,1,4,0,max_length).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    loss_f=nn.CrossEntropyLoss()
-    
-    
-    num_epochs = 10
-    for epoch in range(num_epochs):
-        loss_list = []
-        acc_list = []
-        for i in training_loader:
-            X = i[0].to(device)
-            y = i[1].to(device)
-            optimizer.zero_grad()
-            
-            y_pred = model(X)
-            loss = loss_f(y_pred,y)
-            loss.backward()
-            optimizer.step()
-            loss_list.append(loss.item())
-            
-            num_correct = 0
-            num_samples = 0
-            _,predictions = y_pred.max(1)
-            print(y_pred)
-            print(predictions)
-            print(y)
-    
-            num_correct += (predictions == y).sum()  # will generate a 0-D tensor, tensor(49), float() to convert it
-    
-            num_samples  += predictions.size(0)
-    
-            acc_list.append(float(num_correct)/float(num_samples)*100)
-            
-        loss,acc = sum(loss_list)/len(loss_list),sum(acc_list)/len(acc_list)
-    
-
-        print('Epoch {0}/{1} loss: {2:6.2f} - accuracy{3:6.2f}%'.format(epoch+1,num_epochs,loss,acc))
-
-    #torch.save(model.state_dict(),'/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/add3.pth')
-    
-
-
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    max_length = 56
+    model = Encoder(max_length,21,12,1,10,0,max_length).to(device)
+    model.load_state_dict(torch.load('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/model/transformer_balance.pth'))
+    merList = ['YPALPHDTAI','IPAASQLDL','MPEAMTIVML']
+    HLA = ['HLA-B*3501']
+    result = construct_df4deeplearningmodel(merList,HLA,model,device,hla,dic_inventory)
+    print(result)
 
 
 

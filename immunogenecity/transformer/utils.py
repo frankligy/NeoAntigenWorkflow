@@ -18,7 +18,10 @@ import pandas as pd
 import re
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import Normalizer, StandardScaler,MinMaxScaler,RobustScaler
+from sklearn.metrics import roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score,accuracy_score
 import collections
+import itertools
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -1230,10 +1233,80 @@ class transformer_enrich(Dataset):
 
             
             
-            
+###########################################################################
+# scoring
+def construct_df4deeplearningmodel(merList,HLA,model,device,hla,dic_inventory):
+
+    cartesian = list(itertools.product(merList,HLA))   # [(merlist1,hla1),(merlist1,hla2),()...., (merlist3,hla1),.......]
+    col1 = [tup[0] for tup in cartesian]
+    col2 = [tup[1] for tup in cartesian]
+    col3 = [0 for _ in range(len(cartesian))]
+    ori = pd.DataFrame({'peptide':col1,'HLA':col2,'immunogenecity':col3})
+    scoring_dataset = dataset(ori,hla,dic_inventory)
+
+    scoring_loader = DataLoader(scoring_dataset,batch_size=len(cartesian),shuffle=False,drop_last=True)
 
 
 
+    model.eval()
+    with torch.no_grad():
+        for i,(X,y) in enumerate(scoring_loader):
+
+            x = X.to(device)
+            y_pred = model(x)
+    diff = y_pred[:,1] - y_pred[:,0]
+    result = fiddle_result(cartesian,diff)
+    return result
+
+
+def fiddle_result(cartesian,diff):
+    diff = diff.detach().cpu().numpy()
+    result = []
+    for i in range(len(cartesian)):
+        item = cartesian[i]
+        item = list(item)
+        item.append(diff[i])
+        if diff[i] >=  0:
+            result.append(item)
+    return result            
+
+
+
+#################################################################################
+def draw_ROC(y_true,y_pred):
+
+    fpr,tpr,_ = roc_curve(y_true,y_pred,pos_label=1)
+    area_mine = auc(fpr,tpr)
+    fig = plt.figure()
+    lw = 2
+    plt.plot(fpr, tpr, color='darkorange',
+            lw=lw, label='ROC curve (area = %0.2f)' % area_mine)
+    plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver operating characteristic example')
+    plt.legend(loc="lower right")
+    plt.show()
+
+def draw_PR(y_true,y_pred):
+    precision,recall,_ = precision_recall_curve(y_true,y_pred,pos_label=1)
+    area_PR = auc(recall,precision)
+    baseline = np.sum(np.array(y_true) == 1) / len(y_true)
+
+    plt.figure()
+    lw = 2
+    plt.plot(recall,precision, color='darkorange',
+            lw=lw, label='PR curve (area = %0.2f)' % area_PR)
+    plt.plot([0, 1], [baseline, baseline], color='navy', lw=lw, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('PR curve example')
+    plt.legend(loc="lower right")
+    plt.show()
 
 
 

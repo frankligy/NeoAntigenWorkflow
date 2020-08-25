@@ -821,7 +821,7 @@ class NeoJ(Meta):
 
     
     def netMHCresult(self,HLA,pathSoftWare,mode,sb=0.5,wb=2.0):
-        col = []
+        col1,col2,col3 = [],[],[]
         for i in range(self.df.shape[0]):
             #print(i)
             merList = self.df['{0}mer'.format(self.mer)].tolist()[i]
@@ -830,9 +830,19 @@ class NeoJ(Meta):
             netMHCpan.pepFile(merList) # get query.pep file
             machine = netMHCpan(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp','query{}.pep'.format(os.getpid())),HLA,pathSoftWare,self.mer,mode,sb,wb)
             dic = machine.seperator()
+            if not dic == 'No candidates':
+                _, data, length = is_dict_empty(dic)
+            else:
+                data, length = 'No candidates','No candidates'
 
-            col.append(dic)
-        self.df['{0}result'.format(mode)]=col
+            col1.append(dic)
+            col2.append(data)
+            col3.append(length)
+            
+        self.df['HLAIpresented_dict'] = col1
+        self.df['HLAIpresented_total'] = col2
+        self.df['HLAIpresented_count'] = col3
+
             
     def MHCflurry(self,HLA,mode,sb=50,wb=500):
         HLA = HLA.split(',')
@@ -842,17 +852,22 @@ class NeoJ(Meta):
             merList = self.df['{0}mer'.format(self.mer)].tolist()[i]
             if merList == ['MANNUAL']: merList = self.df['mannual'].tolist()[i]
             merList = pre_process(merList)
-            df_result = predictor.predict(peptides=merList,alleles=HLA,verbose=0)
-            dic_result = post_process(df_result,HLA,sb,wb)
-            cond,data,length = is_dict_empty(dic_result)
-            if cond:    
+            if not merList: 
                 col1.append('No candidates')
                 col2.append('No candidates')
                 col3.append('No candidates')
-            else: 
-                col1.append(dic_result)
-                col2.append(data)
-                col3.append(length)
+            else:
+                df_result = predictor.predict(peptides=merList,alleles=HLA,verbose=0)
+                dic_result = post_process(df_result,HLA,sb,wb)
+                cond,data,length = is_dict_empty(dic_result)
+                if cond:    
+                    col1.append('No candidates')
+                    col2.append('No candidates')
+                    col3.append('No candidates')
+                else: 
+                    col1.append(dic_result)
+                    col2.append(data)
+                    col3.append(length)
             
         self.df['HLAIpresented_dict'] = col1
         self.df['HLAIpresented_total'] = col2
@@ -1045,7 +1060,7 @@ class netMHCpan():
                 hlaQuery = netMHCpan.hlaType(hlaList[i])  # HLA-A01:01 to HLA-A*01:01
                 occurence = [k for k in range(len(hlaAllele)) if hlaAllele[k] == hlaQuery]
                 [sb.append(mer[j]) if level[j]=='SB' else wb.append(mer[j]) for j in occurence]
-                dic[hlaList[i]] = (sb,wb)
+                dic[hlaList[i]] = [sb,wb]
             self.neoantigen = dic
         return dic
 
@@ -1848,7 +1863,8 @@ def run(NeoJBaml):
     if mode == 'Neoantigen':
         print('starting to deploy binding affinity prediction-Process:{0}\n'.format(PID))
         if MHCmode == 'MHCI':
-            NeoJBaml.MHCflurry(HLA,MHCmode)
+            #NeoJBaml.MHCflurry(HLA,MHCmode)
+            NeoJBaml.netMHCresult(HLA,software,MHCmode)
         elif MHCmode == 'MHCII':
             NeoJBaml.netMHCresult(HLA,software,MHCmode) 
         print('finished binding affinity prediction-Process:{0}\n'.format(PID))
@@ -1857,7 +1873,8 @@ def run(NeoJBaml):
         return NeoJBaml.df   # only get splicing junction peptides
     elif mode == 'immuno+':
         print('starting to deploy binding affinity prediction-Process:{0}\n'.format(PID))
-        NeoJBaml.MHCflurry(HLA,MHCmode)
+        #NeoJBaml.MHCflurry(HLA,MHCmode)
+        NeoJBaml.netMHCresult(HLA,software,MHCmode)
         print('finished binding affinity prediction-Process:{0}\n'.format(PID))
         print('starting immunogenecity prediction\n')
         NeoJBaml.immunogenecity(HLA)
@@ -1878,6 +1895,7 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     global dictGTF
     global hla
     global dic_inventory
+    #global predictor
     if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName))): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName)))
     if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp')): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'temp'))
     if not os.path.exists(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures')): os.makedirs(os.path.join(outFolder,'resultMHC_{0}'.format(taskName),'figures'))
@@ -1897,6 +1915,7 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
     inventory = hla['hla']
     dic_inventory = dict_inventory(inventory)
+
 
   
     if checkGTEx == 'True':

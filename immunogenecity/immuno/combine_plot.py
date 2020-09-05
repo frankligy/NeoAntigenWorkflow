@@ -8,11 +8,12 @@ import numpy as np
 from seperateCNN import *
 from utils import *
 import shelve
+from ResLikeCNN import *
 
 def draw_combined_ROC(arrayP,arrayT):
     fig = plt.figure()
-    colormap = ['red','green','blue','orange']
-    legend = ['iedb','logistic regression','deephlapan','deepimmuno']
+    colormap = ['red','green','blue','orange','cyan']
+    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN']
     for i in range(len(arrayP)):
         fpr,tpr,_ = roc_curve(arrayT[i],arrayP[i],pos_label=1)
         area = auc(fpr, tpr)
@@ -30,8 +31,8 @@ def draw_combined_ROC(arrayP,arrayT):
 
 def draw_combined_PR(arrayP,arrayT):
     fig = plt.figure()
-    colormap = ['red','green','blue','orange']
-    legend = ['iedb','logistic regression','deephlapan','deepimmuno']
+    colormap = ['red','green','blue','orange','cyan']
+    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN']
     for i in range(len(arrayP)):
         precision,recall,_ = precision_recall_curve(arrayT[i],arrayP[i],pos_label=1)
         area = auc(recall, precision)
@@ -85,9 +86,14 @@ if __name__ == '__main__':
     y_iedb = iedb['label'].tolist()
     y_pred_iedb = iedb['score'].tolist()
 
+    # result from ResLikeCNN
+    ResLikeCNN = model()
+    ResLikeCNN.load_weights('ResLikeCNN_epoch8_sigmoid/')
+    res = ResLikeCNN.predict([input1_test,input2_test])
+
     # let's draw the figure
-    arrayP = [y_pred_iedb,y_pred,y_pred_deephlapan,result[:,1]]
-    arrayT = [y_iedb,Y_test,y_deephlapan,label_test]
+    arrayP = [y_pred_iedb,y_pred,y_pred_deephlapan,result[:,1],res]
+    arrayT = [y_iedb,Y_test,y_deephlapan,label_test,label_test]
     draw_combined_ROC(arrayP,arrayT)
     draw_combined_PR(arrayP,arrayT)
 

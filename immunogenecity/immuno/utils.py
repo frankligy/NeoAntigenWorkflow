@@ -139,7 +139,7 @@ def draw_ROC(y_true,y_pred):
     plt.show()
 
 def draw_PR(y_true,y_pred):
-    precision,recall,_ = precision_recall_curve(y_true,y_pred,pos_label=1)
+    precision,recall,cutoff = precision_recall_curve(y_true,y_pred,pos_label=1)
     area_PR = auc(recall,precision)
     baseline = np.sum(np.array(y_true) == 1) / len(y_true)
 
@@ -155,8 +155,21 @@ def draw_PR(y_true,y_pred):
     plt.title('PR curve example')
     plt.legend(loc="lower right")
     plt.show()
+    return cutoff
 
-
+def draw_history(history):
+    plt.subplot(211)
+    plt.title('Loss')
+    plt.plot(history.history['loss'], label='train')
+    plt.plot(history.history['val_loss'], label='test')
+    plt.legend()
+    # plot accuracy during training
+    plt.subplot(212)
+    plt.title('Accuracy')
+    plt.plot(history.history['accuracy'], label='train')
+    plt.plot(history.history['val_accuracy'], label='test')
+    plt.legend()
+    plt.show()
 
 
 

@@ -87,6 +87,7 @@ if __name__ == '__main__':
     input2 = pull_hla(dataset)
     label = pull_label(dataset)
     seperateCNNmodel = seperateCNN()
+
     seperateCNNmodel.load_weights('secondFilter32_epoch150/')
     seperateCNNmodel.compile(
         loss=keras.losses.SparseCategoricalCrossentropy(),
@@ -102,7 +103,7 @@ if __name__ == '__main__':
     )
 
     # now let's test in external dataset
-    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    ori_test = pd.read_csv('data/shuffle_validation_filter910.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
     dataset_test = construct(ori_test, hla, dic_inventory)
     input1_test = pull_peptide(dataset_test)
     input2_test = pull_hla(dataset_test)

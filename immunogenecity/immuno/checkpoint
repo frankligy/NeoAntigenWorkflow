@@ -1,0 +1,2 @@
+model_checkpoint_path: "transfer_learning_best_performance_achieved"
+all_model_checkpoint_paths: "transfer_learning_best_performance_achieved"

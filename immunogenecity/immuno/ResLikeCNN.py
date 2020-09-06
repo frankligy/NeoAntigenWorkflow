@@ -92,6 +92,11 @@ class model(keras.Model):
         out = self.fc2(out)
         return out
 
+    def model(self):
+        x1 = keras.Input(shape=(10,21,1))
+        x2 = keras.Input(shape=(46,21,1))
+        return keras.Model(inputs=[x1,x2],outputs=self.call([x1,x2]))
+
 
 
 

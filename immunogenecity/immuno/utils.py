@@ -39,6 +39,7 @@ def rescue_unknown_hla(hla, dic_inventory):
     first2 = hla[6:8]
     last2 = hla[8:]
     big_category = dic_inventory[type_]
+    #print(hla)
     if not big_category.get(first2) == None:
         small_category = big_category.get(first2)
         distance = [abs(int(last2) - int(i)) for i in small_category]

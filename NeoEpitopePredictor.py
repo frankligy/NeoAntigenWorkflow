@@ -42,6 +42,7 @@ def GetIncreasedPart(df):
     df['sign'] = df['dPSI'].apply(lambda x: True if x>0 else False) # x = lambda a,b:a+b; x(5,6)   
     df_ori = df[df['sign']==True]
     df_ori = df_ori.drop(columns=['sign'])  # how to drop a column
+    df_ori = df_ori.set_index(pd.Index(np.arange(df_ori.shape[0])))
     return df_ori
 
 
@@ -185,27 +186,28 @@ def transcript2peptide(cdna_sequence):   # actually to ORF
             if m.start() % 3 == 0:
                 pos.append(m.start())
         if pos == []:
-            pos = rescue_position(pos,manner)
-        frag_array,last_seq = pos_to_frags(pos,manner)
-        for frag in frag_array:
-            if 'ATG' not in frag or len(frag) == 0:
-                continue
-            else:
-                for n in re.finditer(r'ATG',frag):
-                    if (len(frag) - n.start()) % 3 == 0:
-                        frag_comp = frag[n.start():]
-                        frag_comp_array.append(frag_comp)
-                        break   # might have multiple 'ATG' so it is necessary to break when find first 'ATG'
-                    else:
-                        continue
-    # process last_seq:
-        for n in re.finditer(r'ATG',last_seq):
-            if n.start() % 3 == 0:
-                last_frag = last_seq[n.start():]
-                protruding = len(last_frag) % 3
-                end = -1 - protruding + 1   # python end exclusive, so + 1
-                last_frag_real = last_frag[:end]
-                frag_comp_array.append(last_frag_real)
+            frag_comp_array.extend(rescue_position(pos,manner))
+        else:
+            frag_array,last_seq = pos_to_frags(pos,manner)
+            for frag in frag_array:
+                if 'ATG' not in frag or len(frag) == 0:
+                    continue
+                else:
+                    for n in re.finditer(r'ATG',frag):
+                        if (len(frag) - n.start()) % 3 == 0:
+                            frag_comp = frag[n.start():]
+                            frag_comp_array.append(frag_comp)
+                            break   # might have multiple 'ATG' so it is necessary to break when find first 'ATG'
+                        else:
+                            continue
+        # process last_seq:
+            for n in re.finditer(r'ATG',last_seq):
+                if n.start() % 3 == 0:
+                    last_frag = last_seq[n.start():]
+                    protruding = len(last_frag) % 3
+                    end = -1 - protruding + 1   # python end exclusive, so + 1
+                    last_frag_real = last_frag[:end]
+                    frag_comp_array.append(last_frag_real)
     #######################  # We think if you only has longer length(0-7) but add_score is not higher than original one, you are FAlSE
     max_seq = ''
     max_length = 0
@@ -234,10 +236,10 @@ def rescue_position(pos,manner):
         if m.start() % 3 ==0:
             span = len(manner) - m.start()
             protruding = span % 3
-            end = -1 - protruding
+            end = -1 - protruding + 1
             frag = manner[m.start():end]
             pos.append(frag)
-    return pos
+    return pos   # pos is actually a list of peptides
             
 
 
@@ -496,8 +498,10 @@ def check_if_good_representative(df):
     df['getTranslated'] = outer_condition_array
     df_retained = df[df['getTranslated']==True]
     df_retained = df_retained.drop(columns=['getTranslated']) 
+    df_retained = df_retained.set_index(pd.Index(np.arange(df_retained.shape[0])))
     df_filtered = df[df['getTranslated']==False] 
     df_filtered = df_filtered.drop(columns=['getTranslated'])
+    df_filtered = df_filtered.set_index(pd.Index(np.arange(df_filtered.shape[0])))
      # filter out events that can not match with existing ones, or events that could match but splicing site won't involve in ORF formation
     return df_retained,df_filtered
             
@@ -719,7 +723,7 @@ def diffNovelFromNotInvolved(df):
         raise Exception('jkjk')
     return df_novel
 
-def diffNovelFromNotInvolved_new(df):
+def diffNovelFromNotInvolved_new(df):   # we want novel one but not the one that fail the involvement test just because their junction doesn't contribute to ORF formation,those will be ['skipped'] in the third round column since they are normal splicing event 
     col = []
     for i in range(df.shape[0]):
         cond = df['third_round'].iloc[i]
@@ -736,6 +740,7 @@ def diffNovelFromNotInvolved_new(df):
             col.append(crystal)
     df['check'] = col
     df_novel = df[df['check']]
+    df_novel = df_novel.set_index(pd.Index(np.arange(df_novel.shape[0])))
     return df_novel
 
 def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
@@ -770,6 +775,7 @@ def check_GTEx(df,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio):
     df['cond'] = col
     new_df = df[df['cond']]
     new_df = new_df.drop(columns = ['cond'])
+    new_df = new_df.set_index(pd.Index(np.arange(new_df.shape[0])))
     return new_df
 
 def convertExonList(df):
@@ -968,7 +974,7 @@ def ORF_check(df):
         print('The {}th run'.format(i))
         temp=uid(df,i) 
         EnsGID = list(temp.keys())[0].split(':')[1]
-        space = dictExonList_p[EnsGID]  # {'ENSP':exonlists,'ENSP':exonlists...}
+        space = dictExonList_p[EnsGID]  # [('ENSP',exonlists),('ENSP',exonlists)...]
         ORF = df.iloc[i]['ORF']
         first = df.iloc[i]['exam_first_whole_transcripts']
         second = df.iloc[i]['second_round']
@@ -979,9 +985,13 @@ def ORF_check(df):
         else:
             NMD = ['None']   # intron, unrecoverable or third round is still all empty
             translate = ['None']
-        
+            col1.append(NMD)
+            col2.append(translate)
+            continue
+
         NMD = []
         translate = []
+        #print(len(ORF),len(space))
         if len(ORF) == len(space):   # not trans-splicing events
  
             for j in range(len(ORF)):
@@ -991,10 +1001,10 @@ def ORF_check(df):
                     translate.append('')
                 elif orf:
                     whole_ = whole[j]
-                    space_ENSP = list(space.keys())[j]
-                    space_exons = list(space.values())[j]
+                    try:space_ENSP = space[j][0]
+                    except:print(j,space,EnsGID,ORF); print(df);raise Exception
                     
-                    #result = grabEnsemblTranscriptTable(space_ENST)
+                    space_exons = space[j][1]
                     result = check_translation(EnsGID,space_ENSP)
 
                     translate.append(result)
@@ -1575,16 +1585,21 @@ def main(intFile,dataFolder,outFolder,mode,cutoff_PSI,cutoff_sampleRatio,cutoff_
     dict_biotype = biotype(df_biotype)
     print('Please wait 10 minutes for loading GTEx data')
 
-    with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp.pbz2'),'rb') as f1:
-         dicTissueExp = cpickle.load(f1)  
-    print('Already loaded GTEx data')
+    if not os.path.exists(os.path.join(outFolder,'after_GTEx.txt')):
+
+        with bz2.BZ2File(os.path.join(dataFolder,'dicTissueExp.pbz2'),'rb') as f1:
+            dicTissueExp = cpickle.load(f1)  
+        print('Already loaded GTEx data')
 
 
-    # get tumor-specific part
-    df_ori =  check_GTEx(df_ori,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio)   
-    if df_ori.shape[0] == 0: 
-        raise Exception('After checking GTEx, no events remain')
-    df_ori.to_csv(os.path.join(outFolder,'after_GTEx.txt'),sep='\t',index=None)
+        # get tumor-specific part
+        df_ori =  check_GTEx(df_ori,cutoff_PSI,cutoff_sampleRatio,cutoff_tissueRatio)   
+        if df_ori.shape[0] == 0: 
+            raise Exception('After checking GTEx, no events remain')
+        df_ori.to_csv(os.path.join(outFolder,'after_GTEx.txt'),sep='\t',index=None)
+    
+    else:
+        df_ori = pd.read_csv(os.path.join(outFolder,'after_GTEx.txt'),sep='\t')
 
     print('Overlapping with human membrane proteins')
     
@@ -1598,6 +1613,7 @@ def main(intFile,dataFolder,outFolder,mode,cutoff_PSI,cutoff_sampleRatio,cutoff_
     if df_ori.shape[0] == 0:
         raise Exception('After overlapping with membrane proteins, no events remain')
     df_ori_narrow = df_ori_narrow.drop(columns=['condition'])
+    df_ori_narrow = df_ori_narrow.set_index(pd.Index(np.arange(df_ori_narrow.shape[0])))
 
 
 
@@ -1610,6 +1626,7 @@ def main(intFile,dataFolder,outFolder,mode,cutoff_PSI,cutoff_sampleRatio,cutoff_
     df_third = third_round(df_second)
     print('predicting most likely ORFs...')
     df_ORF = getORF(df_third)
+    #df_ORF.to_csv(os.path.join(outFolder,'inter.txt'),sep='\t')
     print('labelling potential ORFs that will subjected to NMD and non-translatable ones...')
     df_ORF_check = ORF_check(df_ORF)
     print('in-silico translation...')
@@ -1626,11 +1643,13 @@ def main(intFile,dataFolder,outFolder,mode,cutoff_PSI,cutoff_sampleRatio,cutoff_
     ### final alignment
     dict_uni_fa = read_uniprot_seq(os.path.join(dataFolder,'uniprot_isoform.fasta'))
         
-    df_retained_aligned = alignment_to_uniprot(df_retained,dict_uni_fa,Ens2ACC,mode)   
+    df_retained_aligned = alignment_to_uniprot(df_retained,dict_uni_fa,Ens2ACC,mode) 
+    df_retained_aligned = df_retained_aligned.drop(columns=['exam_seq'])  
     df_retained_aligned.to_csv(os.path.join(outFolder,'df_retained.txt'),sep='\t',index=None)
     
     # for filtered ones
     df_novel = diffNovelFromNotInvolved_new(df_filtered)
+    #df_novel = df_novel.drop(columns=['exam_seq'])
     df_novel.to_csv(os.path.join(outFolder,'df_novel.txt'),sep='\t',index=None)    
 
 def usage():

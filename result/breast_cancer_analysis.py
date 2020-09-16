@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as sc
 from matplotlib.colors import ListedColormap
 import collections
+import math
 
 
 df = pd.read_csv('/Users/ligk2e/Desktop/final.txt',sep='\t',header=None)
@@ -177,5 +178,114 @@ df['label'] = label
 df.columns = ['TCGA-ID','neojunction-count','neoantigen-count','label']
 df.to_csv('/Users/ligk2e/Desktop/stratification.txt',sep='\t',index=None)
 
+
+## after talking with Anu on Sep 15th
+# task 1: multivariable correlation in 3D plot with multiple correlation
+def multiple_correlation(xy,xz,yz,n,k=2):
+    # refer to http://www.real-statistics.com/correlation/multiple-correlation/
+    # z is dependent variable and y,z are independent variable
+    Rxyz = math.sqrt((abs(xz ** 2) + abs(yz ** 2) - 2 * xz * yz * xy) / (1 - abs(xy ** 2)))
+    R2 = Rxyz ** 2
+    k = 2  # Number of independent variables
+    R2_adj = 1 - (((1 - R2) * (n - 1)) / (n - k - 1))
+    return Rxyz,R2,R2_adj
+
+df3d = pd.read_csv('/Users/ligk2e/Desktop/final2.txt',sep='\t',header=None)
+df3d_corr = df3d.corr()
+'''
+1. neojunctions
+2. neoantigens
+3. neojunctions that give rise to neoantigens
+
+here 2 is z, 1,3 are x and y
+'''
+xy = df3d_corr.loc[1,3]
+xz = df3d_corr.loc[1,2]
+yz = df3d_corr.loc[2,3]
+metric = multiple_correlation(xy,xz,yz,len(df3d))
+
+from mpl_toolkits import mplot3d
+df3d = pd.read_csv('/Users/ligk2e/Desktop/final2.txt',sep='\t',header=None)
+ax = plt.axes(projection='3d')
+ax.scatter3D(df3d[1],df3d[3],df3d[2])
+ax.set_xlabel('Neojunction count per patient')
+ax.set_ylabel('Neojunctions that give rise to neoantigens')
+ax.set_zlabel('Neoantigen count')
+ax.legend(['Adjusted multiple correlation: {0:.2f}'.format(metric[2])])
+
+# color code PAM-50 groups
+
+# overlay basal-like, so all basal like sample will be labelled as 1
+ax = plt.axes(projection='3d')
+label = np.array([1 if pam50_dic[item]=='Basal-like' else 0 for item in df3d[0]])
+colors = ListedColormap(['g','r'])
+scatter = ax.scatter3D(df3d[1],df3d[2],df3d[3],c=label,cmap=colors)
+legend1 = ax.legend(handles=scatter.legend_elements()[0],labels=['non-basal','basal'])
+plt.gca().add_artist(legend1)
+#ax.legend(['Multiple correlation: {0:.2f}'.format(metric[2])],loc='upper left')
+plt.title('Distribution of basal patients')
+
+# overlay HER2
+ax = plt.axes(projection='3d')
+label = np.array([1 if pam50_dic[item]=='HER2-enriched' else 0 for item in df3d[0]])
+colors = ListedColormap(['g','r'])
+scatter = ax.scatter3D(df3d[1],df3d[2],df3d[3],c=label,cmap=colors)
+legend1 = ax.legend(handles=scatter.legend_elements()[0],labels=['non-HER2','HER2'])
+plt.gca().add_artist(legend1)
+#ax.legend(['Multiple correlation: {0:.2f}'.format(metric[2])],loc='upper left')
+plt.title('Distribution of HER2 patients')
+
+# overlay luminalA
+ax = plt.axes(projection='3d')
+label = np.array([1 if pam50_dic[item]=='Luminal A' else 0 for item in df3d[0]])
+colors = ListedColormap(['g','r'])
+scatter = ax.scatter3D(df3d[1],df3d[2],df3d[3],c=label,cmap=colors)
+legend1 = ax.legend(handles=scatter.legend_elements()[0],labels=['non-LuminalA','LuminalA'])
+plt.gca().add_artist(legend1)
+#ax.legend(['Multiple correlation: {0:.2f}'.format(metric[2])],loc='upper left')
+plt.title('Distribution of LuminalA patients')
+
+# overlay luminal B
+ax = plt.axes(projection='3d')
+label = np.array([1 if pam50_dic[item]=='Luminal B' else 0 for item in df3d[0]])
+colors = ListedColormap(['g','r'])
+scatter = ax.scatter3D(df3d[1],df3d[2],df3d[3],c=label,cmap=colors)
+legend1 = ax.legend(handles=scatter.legend_elements()[0],labels=['non-LuminalB','LuminalB'])
+plt.gca().add_artist(legend1)
+#ax.legend(['Multiple correlation: {0:.2f}'.format(metric[2])],loc='upper left')
+plt.title('Distribution of LuminalB patients')
+
+# overlay normal-like
+ax = plt.axes(projection='3d')
+label = np.array([1 if pam50_dic[item]=='Normal-like' else 0 for item in df3d[0]])
+colors = ListedColormap(['g','r'])
+scatter = ax.scatter3D(df3d[1],df3d[2],df3d[3],c=label,cmap=colors)
+legend1 = ax.legend(handles=scatter.legend_elements()[0],labels=['non-Normal-like','Normal-like'])
+plt.gca().add_artist(legend1)
+#ax.legend(['Multiple correlation: {0:.2f}'.format(metric[2])],loc='upper left')
+plt.title('Distribution of Normal-like patients')
+
+
+## 2d with correlation
+plt.scatter(df3d[1],df3d[2])
+plt.xlabel('Neojunction counts')
+plt.ylabel('Neoantigen counts')
+corr = sc.pearsonr(df3d[1],df3d[2])
+plt.legend(['Pearson correlation: {0:.2f}'.format(corr[0])])
+plt.title('Correlation between Neojunction count and Neoantigen count')
+
+plt.scatter(df3d[1],df3d[3])
+plt.xlabel('Neojunction counts')
+plt.ylabel('Neojunctions that give rise to neoantigens')
+corr = sc.pearsonr(df3d[1],df3d[3])
+plt.legend(['Pearson correlation: {0:.2f}'.format(corr[0])])
+plt.title('Correlation between Neojunction count and Neojunctions that give rise to nenantigens')
+
+plt.scatter(df3d[3],df3d[2])
+plt.xlabel('Neojunctions that give rise to neoantigens')
+plt.ylabel('Neoantigens counts')
+corr = sc.pearsonr(df3d[2],df3d[3])
+plt.legend(['Pearson correlation: {0:.2f}'.format(corr[0])])
+plt.title('Correlation between Neojunctions that give rise to nenantigens and neoantigen counts')
 
 

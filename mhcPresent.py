@@ -30,7 +30,7 @@ from pathos.multiprocessing import ProcessingPool as Pool
 import getopt
 from decimal import Decimal as D
 from mhcflurry import Class1PresentationPredictor
-from dilatedCNN import *
+#from dilatedCNN import *
 import itertools
 
 from torch.utils.data import Dataset, DataLoader, random_split,Subset,ConcatDataset
@@ -153,7 +153,11 @@ class Meta():  #inspect an object: dir(), vars(), instanceName.__dict__, mannual
             hits = sum([True if item else False for item in first])
             if hits == 0: # first round not able to match, launch second_round
                 result = second_round_mhc(temp)
-                self.df['exam_whole_transcripts'].iloc[i] = result
+                # print(i)
+                # print(result)
+                # print(self.df['exam_whole_transcripts'].iloc[i])
+                self.df['exam_whole_transcripts'].iloc[i] = list(result)
+                
 
     def rescueEvent_2(self):    # third round
         for i in range(self.df.shape[0]):
@@ -621,7 +625,7 @@ def second_match(EnsID,query,exam1_coord=False,exam2_coord=False): # dictExonLis
                 query_frag2 = query_frag2.replace('\n','')
                 
                 '''
-                Remember: the arguments to query_from_dict_fa is very simple, it is just the coord[2] and coord[3],
+                Remember: the arguments to query_from_dict_fa is very simple, it is just the coord[2] and coord[3] in exonlist file,
                 no matter which strand it is on. The positive position of the start and end of a segment.
                 
                 if judge is false:
@@ -832,6 +836,8 @@ class NeoJ(Meta):
             dic = machine.seperator()
             if not dic == 'No candidates':
                 _, data, length = is_dict_empty(dic)
+                data = list(set(data))
+                length = len(data)
             else:
                 data, length = 'No candidates','No candidates'
 
@@ -1912,9 +1918,9 @@ def main(intFile,taskName,outFolder,dataFolder,k,HLA,software,MHCmode,mode,Core,
     print('constructing dictGTF file')
     dictGTF = dictGTFconstruct(dataFolder)
     print('some necessary files for immunogenecity prediction\n')
-    hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
-    inventory = hla['hla']
-    dic_inventory = dict_inventory(inventory)
+    # hla = pd.read_csv('/data/salomonis2/LabFiles/Frank-Li/immunogenecity/transformer/hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
+    # inventory = hla['hla']
+    # dic_inventory = dict_inventory(inventory)
 
 
   

@@ -9,11 +9,12 @@ from seperateCNN import *
 from utils import *
 import shelve
 from ResLikeCNN import *
+from aaindex_encoding_ResLikeCNN import model_aaindex,construct_aaindex,pull_hla_aaindex,pull_label_aaindex,pull_peptide_aaindex
 
 def draw_combined_ROC(arrayP,arrayT):
     fig = plt.figure()
     colormap = ['red','green','blue','orange','cyan','magenta']
-    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','transfer_learning']
+    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','aaindex']
     for i in range(len(arrayP)):
         fpr,tpr,_ = roc_curve(arrayT[i],arrayP[i],pos_label=1)
         area = auc(fpr, tpr)
@@ -32,7 +33,7 @@ def draw_combined_ROC(arrayP,arrayT):
 def draw_combined_PR(arrayP,arrayT):
     fig = plt.figure()
     colormap = ['red','green','blue','orange','cyan','magenta']
-    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','transfer_learning']
+    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','aaindex']
     for i in range(len(arrayP)):
         precision,recall,_ = precision_recall_curve(arrayT[i],arrayP[i],pos_label=1)
         area = auc(recall, precision)
@@ -91,13 +92,27 @@ if __name__ == '__main__':
     ResLikeCNN.load_weights('ResLikeCNN_epoch8_sigmoid/')
     res = ResLikeCNN.predict([input1_test,input2_test])
 
-    # result from transfer_learning, well, if you count this best-performed one
-    ResLikeCNN = model()
-    ResLikeCNN.load_weights('transfer_learning_best_performance_achieved')
-    tran = ResLikeCNN.predict([input1_test,input2_test])
+    # result from aaindex12_ResLikeCNN
+    ResLikeCNN_index = model_aaindex()
+    ResLikeCNN_index.load_weights('aaindex12_encoding_ReslikeCNN')
+    table_scaled = wrapper_read_scaling()   # [21,553]
+    after_pca = pca_apply_reduction(table_scaled)   # [21,12]
+    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',
+                           sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    dataset_test = construct_aaindex(ori_test, hla, dic_inventory,after_pca)
+    input1_test_a = pull_peptide_aaindex(dataset_test)
+    input2_test_a = pull_hla_aaindex(dataset_test)
+    label_test_a = pull_label_aaindex(dataset_test)
+    res_aaindex = ResLikeCNN_index.predict(x=[input1_test_a, input2_test_a])
+
+
+    # # result from transfer_learning, well, if you count this best-performed one
+    # ResLikeCNN = model()
+    # ResLikeCNN.load_weights('transfer_learning_best_performance_achieved')
+    # tran = ResLikeCNN.predict([input1_test,input2_test])
 
     # let's draw the figure
-    arrayP = [y_pred_iedb,y_pred,y_pred_deephlapan,result[:,1],res,tran]
+    arrayP = [y_pred_iedb,y_pred,y_pred_deephlapan,result[:,1],res,res_aaindex]
     arrayT = [y_iedb,Y_test,y_deephlapan,label_test,label_test,label_test]
     draw_combined_ROC(arrayP,arrayT)
     draw_combined_PR(arrayP,arrayT)

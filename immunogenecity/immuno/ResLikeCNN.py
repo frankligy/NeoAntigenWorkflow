@@ -141,7 +141,7 @@ if __name__ == '__main__':
         y=label,
         validation_data = ([input1_val,input2_val],label_val),
         batch_size=512,
-        epochs=8,
+        epochs=10,
         class_weight = {0:0.2,1:0.8}   # I have 20% positive and 80% negative in my training data
     )
 

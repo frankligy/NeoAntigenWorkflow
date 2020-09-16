@@ -1,2 +1,2 @@
-model_checkpoint_path: "transfer_learning_best_performance_achieved"
-all_model_checkpoint_paths: "transfer_learning_best_performance_achieved"
+model_checkpoint_path: "aaindex12_encoding_ReslikeCNN"
+all_model_checkpoint_paths: "aaindex12_encoding_ReslikeCNN"

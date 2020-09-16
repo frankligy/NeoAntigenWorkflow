@@ -15,6 +15,7 @@ from sklearn.metrics import roc_curve, auc, precision_recall_curve, confusion_ma
 import collections
 import itertools
 import matplotlib.pyplot as plt
+from alternative_encoding import *
 
 
 def dict_inventory(inventory):
@@ -92,7 +93,7 @@ def peptide_data(peptide):   # return numpy array [10,21,1]
         encode = blosum50_new(peptide)
     elif length == 9:
         peptide = peptide[:5] + '-' + peptide[5:]
-        encode = blosum50_new(peptide)
+        encode = blosum(peptide)
     encode = encode.reshape(encode.shape[0], encode.shape[1], -1)
     return encode
 
@@ -104,7 +105,7 @@ def hla_data(hla, dic_inventory, hla_type):    # return numpy array [46,21,1]
     except KeyError:
         hla_type = rescue_unknown_hla(hla_type, dic_inventory)
         seq = dic[hla_type]
-    encode = blosum50_new(seq)
+    encode = blosum(seq)
     encode = encode.reshape(encode.shape[0], encode.shape[1], -1)
     return encode
 
@@ -173,6 +174,79 @@ def draw_history(history):
     plt.show()
 
 
+def add_X(array):
+    me = np.mean(array)
+    array = np.append(array, me)
+    return array
+
+
+def read_index(path):
+    with open(path, 'r') as f:
+        data = f.readlines()
+        array = []
+        for line in data:
+            line = line.lstrip(' ').rstrip('\n')
+            line = re.sub(' +', ' ', line)
+
+            items = line.split(' ')
+            items = [float(i) for i in items]
+            array.extend(items)
+        array = np.array(array)
+        array = add_X(array)
+        Index = collections.namedtuple('Index',
+                                       ['A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S',
+                                        'T', 'W', 'Y', 'V', 'X'])
+        I = Index._make(array)
+    return I, array  # namedtuple
+
+
+def read_all_indices():
+    table = np.empty([21, 566])
+    for i in range(566):
+        if len(str(i)) == 1:
+            ii = '00' + str(i)
+        elif len(str(i)) == 2:
+            ii = '0' + str(i)
+        else:
+            ii = str(i)
+
+        NA_list_str = ['472', '473', '474', '475', '476', '477', '478', '479', '480', '481', '520', '523', '524']
+        NA_list_int = [int(i) for i in NA_list_str]
+        if ii in NA_list_str: continue
+
+        path = '/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/AAindex1/index{0}.txt'.format(ii)
+
+        _, array = read_index(path)
+
+        table[:, i] = array
+    table = np.delete(table, NA_list_int, 1)
+    return table
+
+
+def scaling(table):  # scale the features
+    table_scaled = RobustScaler().fit_transform(table)
+    return table_scaled
+
+
+def wrapper_read_scaling():
+    table = read_all_indices()
+    table_scaled = scaling(table)
+    return table_scaled
+
+
+def pca_get_components(result):
+    pca= PCA()
+    pca.fit(result)
+    result = pca.explained_variance_ratio_
+    sum_ = 0
+    for index,var in enumerate(result):
+        sum_ += var
+        if sum_ > 0.95:
+            return index    # 25 components
 
 
 
+def pca_apply_reduction(result):
+    pca = PCA(n_components=12)  # or strictly speaking ,should be 26, since python is 0-index
+    new = pca.fit_transform(result)
+    return new

@@ -289,3 +289,32 @@ plt.legend(['Pearson correlation: {0:.2f}'.format(corr[0])])
 plt.title('Correlation between Neojunctions that give rise to nenantigens and neoantigen counts')
 
 
+#### enrichment analysis input file preparation
+# matrix file
+df = pd.read_csv('/Users/ligk2e/Desktop/stratification.txt',sep='\t')
+
+df_new = df.loc[df['label']!='outliers']
+df_new = df_new.set_index(pd.Index(np.arange(df_new.shape[0])))
+
+matrix = pd.crosstab(df_new['TCGA-ID'],df_new['label'])
+matrix.reset_index(inplace=True)
+matrix.rename(columns={'TCGA-ID':'uid'},inplace=True)
+matrix.to_csv('/Users/ligk2e/Desktop/matrix.txt',sep='\t',index=None)
+
+# ref file
+data = np.loadtxt('/Users/ligk2e/Desktop/Anu/ref1.txt').astype(np.int)
+event = pd.read_csv('/Users/ligk2e/Desktop/Anu/eve.txt',sep='\t',header=None)[0]
+event.name = 'event'
+sample = pd.read_csv('/Users/ligk2e/Desktop/Anu/tmp2.txt',sep='\t',header=None)[0]
+sample.name = 'sample'
+df = pd.DataFrame(data=data,index=event,columns=sample)
+df.to_csv('/Users/ligk2e/Desktop/Anu/crosstab_reference.txt',sep='\t')
+df_stack = df.stack()   # a multiindex series
+df_stack = df_stack.loc[df_stack==1]    # combinations that are true
+new = df_stack.index.to_frame()
+new['duplicate'] = new['event']
+new2 = new[['sample','event','duplicate']]
+new2.to_csv('/Users/ligk2e/Desktop/Anu/reference.txt',sep='\t',header=None,index=None)
+
+
+

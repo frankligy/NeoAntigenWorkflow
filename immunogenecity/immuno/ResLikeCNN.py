@@ -176,3 +176,5 @@ if __name__ == '__main__':
     scoring = ResLikeCNN.predict(x=[input1_score,input2_score])
 
 
+
+

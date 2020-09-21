@@ -13,8 +13,8 @@ from aaindex_encoding_ResLikeCNN import model_aaindex,construct_aaindex,pull_hla
 
 def draw_combined_ROC(arrayP,arrayT):
     fig = plt.figure()
-    colormap = ['red','green','blue','orange','cyan','magenta']
-    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','aaindex']
+    colormap = ['red','green','blue','orange','cyan','magenta','black']
+    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','aaindex','Ensemble']
     for i in range(len(arrayP)):
         fpr,tpr,_ = roc_curve(arrayT[i],arrayP[i],pos_label=1)
         area = auc(fpr, tpr)
@@ -32,8 +32,8 @@ def draw_combined_ROC(arrayP,arrayT):
 
 def draw_combined_PR(arrayP,arrayT):
     fig = plt.figure()
-    colormap = ['red','green','blue','orange','cyan','magenta']
-    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','aaindex']
+    colormap = ['red','green','blue','orange','cyan','magenta','black']
+    legend = ['iedb','logistic regression','deephlapan','deepimmuno','ResLikeCNN','aaindex','Ensemble']
     for i in range(len(arrayP)):
         precision,recall,_ = precision_recall_curve(arrayT[i],arrayP[i],pos_label=1)
         area = auc(recall, precision)
@@ -105,6 +105,9 @@ if __name__ == '__main__':
     label_test_a = pull_label_aaindex(dataset_test)
     res_aaindex = ResLikeCNN_index.predict(x=[input1_test_a, input2_test_a])
 
+    # do combined ensemble, first run enselbl.py
+    df = pd.read_csv('ensemble_result.txt',sep='\t')
+    combine = df['combined'].values
 
     # # result from transfer_learning, well, if you count this best-performed one
     # ResLikeCNN = model()
@@ -112,8 +115,8 @@ if __name__ == '__main__':
     # tran = ResLikeCNN.predict([input1_test,input2_test])
 
     # let's draw the figure
-    arrayP = [y_pred_iedb,y_pred,y_pred_deephlapan,result[:,1],res,res_aaindex]
-    arrayT = [y_iedb,Y_test,y_deephlapan,label_test,label_test,label_test]
+    arrayP = [y_pred_iedb,y_pred,y_pred_deephlapan,result[:,1],res,res_aaindex,combine]
+    arrayT = [y_iedb,Y_test,y_deephlapan,label_test,label_test,label_test,label_test]
     draw_combined_ROC(arrayP,arrayT)
     draw_combined_PR(arrayP,arrayT)
 

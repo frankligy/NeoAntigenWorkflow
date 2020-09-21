@@ -167,6 +167,19 @@ def pull_label_aaindex(dataset):
         result[i,:] = dataset[i][2]
     return result
 
+def add_GAN_sample(dataset,pseudo_p_total,pseudo_MHC_total):
+    length = pseudo_p_total.shape[0]
+    pseudo_label_total = np.ones([length,1])   # 12800,1
+    pseudo_p_total = [np.transpose(item,(1,2,0)).astype(np.float64) for item in pseudo_p_total]  # 12800,1,10,12
+    pseudo_MHC_total = [np.transpose(item,(1,2,0)).astype(np.float64) for item in pseudo_MHC_total]  # 12800,1,46,12
+    for i in range(length):
+        tup = (pseudo_p_total[i],pseudo_MHC_total[i],pseudo_label_total[i])
+        dataset.append(tup)
+    return dataset
+
+
+
+
 if __name__ == '__main__':
     table_scaled = wrapper_read_scaling()   # [21,553]
     after_pca = pca_apply_reduction(table_scaled)   # [21,12]
@@ -175,13 +188,23 @@ if __name__ == '__main__':
     inventory = hla['hla']
     dic_inventory = dict_inventory(inventory)
 
-    dataset = construct_aaindex(ori, hla, dic_inventory)   # [ (10,12,1),(46,12,1),(1,1)   ]
+    dataset = construct_aaindex(ori, hla, dic_inventory,after_pca)   # [ (10,12,1),(46,12,1),(1,1)   ]
+    # load the GAN generated positive samples
+    import pickle
+    with open('/Users/ligk2e/Desktop/tmp/pseudo_p_total.p','rb') as f1:
+        pseudo_p_total = pickle.load(f1)
+    with open('/Users/ligk2e/Desktop/tmp/pseudo_MHC_total.p','rb') as f2:
+        pseudo_MHC_total = pickle.load(f2)
+    dataset = add_GAN_sample(dataset,pseudo_p_total,pseudo_MHC_total)
+
     input1 = pull_peptide_aaindex(dataset)
     input2 = pull_hla_aaindex(dataset)
     label = pull_label_aaindex(dataset)
 
+
+
     ori_val = pd.read_csv('data/shuffle_validation_filter910.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
-    dataset_val = construct_aaindex(ori_val, hla, dic_inventory)
+    dataset_val = construct_aaindex(ori_val, hla, dic_inventory,after_pca)
     input1_val = pull_peptide_aaindex(dataset_val)
     input2_val = pull_hla_aaindex(dataset_val)
     label_val = pull_label_aaindex(dataset_val)
@@ -200,14 +223,14 @@ if __name__ == '__main__':
         y=label,
         validation_data = ([input1_val,input2_val],label_val),
         batch_size=512,
-        epochs=15,
+        epochs=7,
         class_weight = {0:0.2,1:0.8}   # I have 20% positive and 80% negative in my training data
     )
 
     # now let's test in external dataset
     ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',
                            sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
-    dataset_test = construct_aaindex(ori_test, hla, dic_inventory)
+    dataset_test = construct_aaindex(ori_test, hla, dic_inventory,after_pca)
     input1_test = pull_peptide_aaindex(dataset_test)
     input2_test = pull_hla_aaindex(dataset_test)
     label_test = pull_label_aaindex(dataset_test)
@@ -220,4 +243,23 @@ if __name__ == '__main__':
     draw_ROC(label_test, result)
     draw_PR(label_test, result)
 
+
+    # external neoantigen dataset
+    ext_test = pd.read_csv('data/mannual_cancer_testing_fiter910.txt',sep='\t')
+    dataset_ext = construct_aaindex(ext_test, hla, dic_inventory,after_pca)
+    input1_ext = pull_peptide_aaindex(dataset_ext)
+    input2_ext = pull_hla_aaindex(dataset_ext)
+    label_ext = pull_label_aaindex(dataset_ext)
+    result = ResLikeCNN_index.predict(x=[input1_ext, input2_ext])
+    hard = [1 if i > 0.5 else 0 for i in result]
+    confusion_matrix(label_ext, hard)
+    f1_score(label_ext, hard)
+    accuracy_score(label_ext, hard)
+    draw_ROC(label_ext, result)
+    draw_PR(label_ext, result)
+
+    ResLikeCNN_index.save_weights('aaindex12_encoding_ReslikeCNN_reproduce/')
+
+
+    ResLikeCNN_index.save_weights('GAN_augmented/')
     ResLikeCNN_index.save_weights('aaindex12_encoding_ReslikeCNN')

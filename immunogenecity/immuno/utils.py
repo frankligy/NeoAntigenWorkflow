@@ -246,7 +246,66 @@ def pca_get_components(result):
 
 
 
-def pca_apply_reduction(result):
+def pca_apply_reduction(result):   # if 95%, 12 PCs, if 99%, 17 PCs, if 90%,9 PCs
     pca = PCA(n_components=12)  # or strictly speaking ,should be 26, since python is 0-index
     new = pca.fit_transform(result)
     return new
+
+
+# from an excel to txt
+def clean_series(series):  # give a pandas series
+
+    if series.dtype == object:  # pandas will store str as object since string has variable length, you can use astype('|S')
+        clean = []
+        for item in series:
+            item = item.lstrip(' ')  # remove leading whitespace
+            item = item.rstrip(' ')  # remove trailing whitespace
+            item = item.replace(' ', '')  # replace all whitespace in the middle
+            clean.append(item)
+    else:
+        clean = series
+
+    return pd.Series(clean)
+
+
+def clean_data_frame(data):  # give a pandas dataFrame
+
+    peptide_clean = clean_series(data['peptide'])
+    hla_clean = clean_series(data['HLA'])
+    immunogenecity_clean = clean_series(data['immunogenecity'])
+
+    data_clean = pd.concat([peptide_clean, hla_clean, immunogenecity_clean], axis=1)
+    data_clean.columns = ['peptide', 'HLA', 'immunogenecity']
+
+    return data_clean
+
+
+def convert_hla(hla):
+    cond = True
+    hla = hla.replace(':', '')
+    if len(hla) < 9:
+        cond = False  # HLA-A3
+    elif len(hla) == 9:  # HLA-A3002
+        f = hla[0:5]  # HLA-A
+        e = hla[5:]  # 3002
+        hla = f + '*' + e
+    return hla, cond
+
+
+def convert_hla_series(df):
+    new = []
+    col = []
+    for i in df['HLA']:
+        hla, cond = convert_hla(i)
+        col.append(cond)
+        if cond == True: new.append(hla)
+    df = df.loc[pd.Series(col)]
+    df = df.set_index(pd.Index(np.arange(df.shape[0])))
+    df['HLA'] = new
+    return df
+
+
+def test_no_space(series):
+    for i in series:
+        if ' ' in i:
+            print('damn')

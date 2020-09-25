@@ -177,6 +177,17 @@ def add_GAN_sample(dataset,pseudo_p_total,pseudo_MHC_total):
         dataset.append(tup)
     return dataset
 
+def correct_label(item):   # item is an element in dataset list, be called by extract_all_positive
+    label = np.ones([1,1]).astype(np.int64)
+    tup = (item[0],item[1],label)
+    return tup
+
+def extract_all_positive(hard,dataset):
+    result = []
+    for i in range(len(hard)):
+        if hard[i] == 1:
+            result.append(correct_label(dataset[i]))
+    return result
 
 
 
@@ -223,8 +234,8 @@ if __name__ == '__main__':
         y=label,
         validation_data = ([input1_val,input2_val],label_val),
         batch_size=512,
-        epochs=7,
-        class_weight = {0:0.2,1:0.8}   # I have 20% positive and 80% negative in my training data
+        epochs=9,
+        class_weight = {0:0.5,1:0.5}   # I have 20% positive and 80% negative in my training data
     )
 
     # now let's test in external dataset
@@ -257,6 +268,25 @@ if __name__ == '__main__':
     accuracy_score(label_ext, hard)
     draw_ROC(label_ext, result)
     draw_PR(label_ext, result)
+
+    ## possibly augment with additional data
+    ResLikeCNN_index = model_aaindex()
+    ResLikeCNN_index.load_weights('aaindex12_encoding_ReslikeCNN_reproduce/')
+    aug = pd.read_csv('data/transfer_validation.txt', sep='\t')
+    hla = pd.read_csv('hla2paratopeTable_aligned.txt', sep='\t', header=None, names=['hla', 'paratope'])
+    inventory = hla['hla']
+    dic_inventory = dict_inventory(inventory)
+    dataset_aug = construct_aaindex(aug,hla,dic_inventory,after_pca)
+    input1_aug = pull_peptide_aaindex(dataset_aug)
+    input2_aug = pull_hla_aaindex(dataset_aug)
+    result = ResLikeCNN_index.predict(x=[input1_aug,input2_aug])
+    hard = [1 if i > 0.7 else 0 for i in result]
+    # extract all positive samples
+    augment = extract_all_positive(hard,dataset_aug)
+    dataset.extend(augment)
+
+
+
 
     ResLikeCNN_index.save_weights('aaindex12_encoding_ReslikeCNN_reproduce/')
 

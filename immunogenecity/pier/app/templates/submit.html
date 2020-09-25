@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>PIER</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</head>
+<body>
+
+
+
+<div class="jumbotron text-center">
+    <h1>PIER</h1>
+    <p><b>P</b>redicting <b>I</b>mmunogenicity using <b>E</b>nsemble <b>R</b>esNet</p> 
+    </div>
+
+
+
+<div class="container">
+    <div class='row'>
+        <div class='col-xl-2'></div>
+        <div class='col-xl-8'>
+            <form action="" method="post" novalidate>
+                <div class="form-group">
+                    <label for="peptide">peptide</label>
+                    <input type="text" class="form-control" placeholder="PLRTQWERN" name="peptide">
+                </div>
+
+                <div class="form-group">
+                    <label for="mhc">MHC</label>
+                    <input type="text" class="form-control" placeholder="HLA-A*0201" name="mhc">
+                </div>
+
+
+                <div class="input-group">
+                    <div class="input-group-prepend">
+                      <span class="input-group-text">Upload</span>
+                    </div>
+                    <div class="custom-file">
+                      <input type="file" class="custom-file-input">
+                      <label class="custom-file-label">Choose file</label>
+                    </div>
+                </div>
+                <br>
+                <button type="submit" class="btn btn-primary">Query</button>
+
+            </form>
+        </div>
+        <div class='col-xl-2'></div>
+    </div>
+</div>
+
+<!-- Footer -->
+<footer class="page-footer font-small">
+    <div class="footer-copyright text-center py-3">© 2020 Copyright:
+      <a href="https://github.com/frankligy"> Guangyuan(Frank) Li</a>
+    </div>
+</footer>
+
+</body>
+</html>

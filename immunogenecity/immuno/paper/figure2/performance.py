@@ -7,6 +7,10 @@ from utils import *
 from sklearn.metrics import roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score,accuracy_score
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib
+
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 
 class ResBlock(layers.Layer):
@@ -427,6 +431,8 @@ if __name__ == '__main__':
     result_train = pd.DataFrame({'label':label[:,0],'blosum':result1[:,0],'aaindex':result2[:,0],'ensemble':result3})
     result_train.to_csv('paper/figure2/result_train.txt',sep='\t')
 
+    result_train = pd.read_csv('paper/figure2/result_train.txt',sep='\t')
+
     # same for validation
     ori_val = pd.read_csv('data/shuffle_validation_filter910.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
     dataset_val = construct(ori_val, hla, dic_inventory)
@@ -445,17 +451,17 @@ if __name__ == '__main__':
     result_val = pd.DataFrame({'label':label_val[:,0],'blosum':result1[:,0],'aaindex':result2[:,0],'ensemble':result3})
     result_val.to_csv('paper/figure2/result_val.txt',sep='\t')
 
+    result_val = pd.read_csv('paper/figure2/result_val.txt',sep='\t')
+
     # let's draw figure 2a
-    training = pd.read_csv('paper/figure2/result_train.txt',sep='\t')
-    arrayP = [training['blosum'],training['aaindex'],training['ensemble']]
-    arrayT = [training['label'],training['label'],training['label']]
+    arrayP = [result_train['blosum'],result_train['aaindex'],result_train['ensemble']]
+    arrayT = [result_train['label'],result_train['label'],result_train['label']]
     draw_combined_ROC(arrayP,arrayT)
     draw_combined_PR(arrayP,arrayT)
 
     # same for validation
-    val = pd.read_csv('paper/figure2/result_val.txt',sep='\t')
-    arrayP = [val['blosum'],val['aaindex'],val['ensemble']]
-    arrayT = [val['label'],val['label'],val['label']]
+    arrayP = [result_val['blosum'],result_val['aaindex'],result_val['ensemble']]
+    arrayT = [result_val['label'],result_val['label'],result_val['label']]
     draw_combined_ROC(arrayP,arrayT)
     draw_combined_PR(arrayP,arrayT)
 

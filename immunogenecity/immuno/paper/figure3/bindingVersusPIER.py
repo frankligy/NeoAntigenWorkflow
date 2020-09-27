@@ -3,11 +3,12 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers,regularizers
 import pandas as pd
-from utils import *
 from sklearn.metrics import roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score,accuracy_score
 import matplotlib.pyplot as plt
 import numpy as np
-
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 class ResBlock(layers.Layer):
     def __init__(self,in_channel,pool_size):
@@ -690,6 +691,16 @@ if __name__ == '__main__':
 
     transfer_df = pd.DataFrame({'FineTune_last_one':result_1[:,0],'FineTune_last_two':result_2[:,0],'FineTune_last_three':result_3[:,0]})
     transfer_df.to_csv('paper/figure3/transfer_df.txt',sep='\t',index=None)
+
+
+    transfer_df = pd.read_csv('paper/figure3/transfer_df.txt',sep='\t')
+    result_1 = transfer_df['FineTune_last_one'].values
+    result_2 = transfer_df['FineTune_last_two'].values
+    result_3 = transfer_df['FineTune_last_three'].values
+
+    result_df = pd.read_csv('paper/model/ensemble_result.txt',sep='\t')
+    result_ensemble = result_df['ensemble']
+    label_test = result_df['label']
 
     arrayP = [result_1,result_2,result_3,result_ensemble]
     arrayT = [label_test,label_test,label_test,label_test]

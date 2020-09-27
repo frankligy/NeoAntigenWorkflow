@@ -46,7 +46,7 @@ if __name__ == '__main__':
         y=label,
         validation_data = ([input1_val,input2_val],label_val),
         batch_size=512,
-        epochs=11,
+        epochs=10,
         #class_weight = {0:0.2,1:0.8}   # I have 20% positive and 80% negative in my training data
     )
     draw_history(history)
@@ -55,7 +55,7 @@ if __name__ == '__main__':
 
 
     # let's test it
-    ori_test = pd.read_csv('data/transfer_testing.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
     dataset_test = construct(ori_test, hla, dic_inventory)
     input1_test = pull_peptide(dataset_test)
     input2_test = pull_hla(dataset_test)
@@ -107,8 +107,8 @@ if __name__ == '__main__':
     )  # if you want to do model.summary, just run a toy case to let the model pick up the input dimension
     ResLikeCNN.layers[0].trainable = False
     ResLikeCNN.layers[1].trainable = False
-    ResLikeCNN.layers[2].trainable = False
-    ResLikeCNN.layers[3].trainable = False
+    #ResLikeCNN.layers[2].trainable = False
+    #ResLikeCNN.layers[3].trainable = False
 
     ori_retrain = pd.read_csv('data/shuffle_training_test.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
     dataset_retrain = construct(ori_retrain, hla, dic_inventory)

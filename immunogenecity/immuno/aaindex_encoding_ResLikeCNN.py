@@ -255,6 +255,9 @@ if __name__ == '__main__':
     draw_PR(label_test, result)
 
 
+
+
+
     # external neoantigen dataset
     ext_test = pd.read_csv('data/mannual_cancer_testing_fiter910.txt',sep='\t')
     dataset_ext = construct_aaindex(ext_test, hla, dic_inventory,after_pca)

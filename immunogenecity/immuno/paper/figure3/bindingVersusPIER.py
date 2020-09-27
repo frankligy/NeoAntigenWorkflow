@@ -561,6 +561,146 @@ if __name__ == '__main__':
     plt.show()
     plt.savefig('paper/figure3/reveal.pdf')
 
+    ## if we do transfer learning, the performance doesn't improve
+    def draw_combined_ROC(arrayP, arrayT):
+        fig = plt.figure()
+        colormap = ['red', 'green', 'blue', 'orange']
+        legend = ['FineTune_last_one_layer','Finetune_last_two_layer','Finetune_last_three_layer','PIER(Ensemble)']
+        # colormap = ['cyan','magenta','orange']
+        # legend = ['PIER(Blosum Encoding)','PIER(AAindex Encoding)','PIER(Ensemble)']
+        for i in range(len(arrayP)):
+            fpr, tpr, _ = roc_curve(arrayT[i], arrayP[i], pos_label=1)
+            area = auc(fpr, tpr)
+            lw = 2
+            plt.plot(fpr, tpr, color=colormap[i],
+                     lw=lw, label='{0} (area = {1:0.2f})'.format(legend[i], area))
+        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.legend(loc="lower right")
+        plt.show()
+        plt.savefig('paper/figure3/transfer_learning_ROC.pdf')
+
+
+    def draw_combined_PR(arrayP, arrayT):
+        fig = plt.figure()
+        colormap = ['red', 'green', 'blue', 'orange']
+        legend = ['FineTune_last_one_layer','Finetune_last_two_layer','Finetune_last_three_layer','PIER(Ensemble)']
+        # colormap = ['cyan','magenta','orange']
+        # legend = ['PIER(Blosum Encoding)','PIER(AAindex Encoding)','PIER(Ensemble)']
+        for i in range(len(arrayP)):
+            precision, recall, _ = precision_recall_curve(arrayT[i], arrayP[i], pos_label=1)
+            area = auc(recall, precision)
+            lw = 2
+            plt.plot(recall, precision, color=colormap[i],
+                     lw=lw, label='{0} (area = {1:0.2f})'.format(legend[i], area))
+        plt.plot([0, 1], [0.12, 0.12], color='navy', lw=lw, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.legend(loc="best")
+        plt.show()
+        plt.savefig('paper/figure3/transfer_learning_pr.pdf')
+
+    # make sure ResLikeCNN has been initiated
+    ResLikeCNN = model()
+    ResLikeCNN.load_weights('paper/figure3/transfer_learning/fine_tune/freeze0123/')
+    ResLikeCNN.compile(
+        loss='binary_crossentropy',
+        optimizer=keras.optimizers.Adam(lr=0.001),
+        metrics=['accuracy']
+    )
+    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    dataset_test = construct(ori_test, hla, dic_inventory)
+    input1_test = pull_peptide(dataset_test)
+    input2_test = pull_hla(dataset_test)
+    label_test = pull_label(dataset_test)
+    result_1 = ResLikeCNN.predict(x=[input1_test,input2_test])   # Finetune_last_one_layer
+
+    ResLikeCNN = model()
+    ResLikeCNN.load_weights('paper/figure3/transfer_learning/fine_tune/freeze012/')
+    ResLikeCNN.compile(
+        loss='binary_crossentropy',
+        optimizer=keras.optimizers.Adam(lr=0.001),
+        metrics=['accuracy']
+    )
+    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    dataset_test = construct(ori_test, hla, dic_inventory)
+    input1_test = pull_peptide(dataset_test)
+    input2_test = pull_hla(dataset_test)
+    label_test = pull_label(dataset_test)
+    result_2 = ResLikeCNN.predict(x=[input1_test,input2_test])   # Finetune_last_two_layer
+
+
+    ResLikeCNN = model()
+    ResLikeCNN.load_weights('paper/figure3/transfer_learning/fine_tune/freeze01/')
+    ResLikeCNN.compile(
+        loss='binary_crossentropy',
+        optimizer=keras.optimizers.Adam(lr=0.001),
+        metrics=['accuracy']
+    )
+    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    dataset_test = construct(ori_test, hla, dic_inventory)
+    input1_test = pull_peptide(dataset_test)
+    input2_test = pull_hla(dataset_test)
+    label_test = pull_label(dataset_test)
+    result_3 = ResLikeCNN.predict(x=[input1_test,input2_test])   # Finetune_last_three_layer
+
+    # Ensemble model load, by the way save your ensemble result
+    ori = pd.read_csv('data/shuffle_training_test.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910.txt
+    hla = pd.read_csv('hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
+    inventory = hla['hla']
+    dic_inventory = dict_inventory(inventory)
+    table_scaled = wrapper_read_scaling()   # [21,553]
+    after_pca = pca_apply_reduction(table_scaled)   # [21,12]
+    ResLikeCNN_index = model_aaindex()
+    ResLikeCNN_index.load_weights('aaindex12_encoding_ReslikeCNN_reproduce/')
+    ResLikeCNN_index.compile(
+        loss='binary_crossentropy',
+        optimizer=keras.optimizers.Adam(lr=0.001),
+        metrics=['accuracy']
+    )
+    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    dataset_test = construct_aaindex(ori_test, hla, dic_inventory,after_pca)
+    input1_test = pull_peptide_aaindex(dataset_test)
+    input2_test = pull_hla_aaindex(dataset_test)
+    label_test = pull_label_aaindex(dataset_test)
+    result_aaindex = ResLikeCNN_index.predict(x=[input1_test,input2_test])
+
+    ResLikeCNN = model()
+    ResLikeCNN.load_weights('ResLikeCNN_epoch8_sigmoid/')
+    ResLikeCNN_index.compile(
+        loss='binary_crossentropy',
+        optimizer=keras.optimizers.Adam(lr=0.001),
+        metrics=['accuracy']
+    )
+    ori_test = pd.read_csv('data/ineo_testing_filter910_new.txt',sep='\t')  # shuffle_validation_filter910.txt # ineo_testing_filter910_new.txt
+    dataset_test = construct(ori_test, hla, dic_inventory)
+    input1_test = pull_peptide(dataset_test)
+    input2_test = pull_hla(dataset_test)
+    label_test = pull_label(dataset_test)
+    result_blosum = ResLikeCNN.predict(x=[input1_test,input2_test])
+
+    result_ensemble = np.mean(np.concatenate([result_aaindex,result_blosum],axis=1),axis=1)
+    result_df = pd.DataFrame({'label':label_test[:,0],'aaindex':result_aaindex[:,0],'blosum':result_blosum[:,0],'ensemble':result_ensemble})
+    result_df.to_csv('paper/model/ensemble_result.txt',sep='\t',index=None)
+
+    transfer_df = pd.DataFrame({'FineTune_last_one':result_1[:,0],'FineTune_last_two':result_2[:,0],'FineTune_last_three':result_3[:,0]})
+    transfer_df.to_csv('paper/figure3/transfer_df.txt',sep='\t',index=None)
+
+    arrayP = [result_1,result_2,result_3,result_ensemble]
+    arrayT = [label_test,label_test,label_test,label_test]
+    draw_combined_ROC(arrayP,arrayT)
+    draw_combined_PR(arrayP,arrayT)
+
+
+
+
+
+
 
 
 

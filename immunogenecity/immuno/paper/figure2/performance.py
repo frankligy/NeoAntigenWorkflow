@@ -492,7 +492,13 @@ if __name__ == '__main__':
         h = y1[i] + 0.008
         ax.text(x1[i]-0.2,h,y1[i])
     plt.savefig('paper/figure2/barplot_PR.pdf')
-
+    ## alternative way:
+    '''
+    matplotlib.rcParams['axes.linewidth'] = 0.5             matplotlib.rcParams['pdf.fonttype'] = 42 
+    matplotlib.rcParams['font.family'] = 'sans-serif'             matplotlib.rcParams['font.sans-serif'] = 'Arial'
+    matplotlib.use('Agg')
+    matplotlib.rcParams['backend'] = 'Agg'
+'''
 
 
 

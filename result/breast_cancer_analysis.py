@@ -317,4 +317,109 @@ new2 = new[['sample','event','duplicate']]
 new2.to_csv('/Users/ligk2e/Desktop/Anu/reference.txt',sep='\t',header=None,index=None)
 
 
+## ref4000 files
+data = np.loadtxt('/Users/ligk2e/Desktop/Anu/e4000/ref4000.txt').astype(np.int)
+event = pd.read_csv('/Users/ligk2e/Desktop/Anu/e4000/e4000.txt',sep='\t',header=None)[0]
+event.name = 'event'
+sample = pd.read_csv('/Users/ligk2e/Desktop/Anu/tmp2.txt',sep='\t',header=None)[0]
+sample.name = 'sample'
+df = pd.DataFrame(data=data,index=event,columns=sample)
+df.to_csv('/Users/ligk2e/Desktop/Anu/e4000/crosstab_reference.txt',sep='\t')
+df_stack = df.stack()   # a multiindex series
+df_stack = df_stack.loc[df_stack==1]    # combinations that are true
+new = df_stack.index.to_frame()
+new['duplicate'] = new['event']
+new2 = new[['sample','event','duplicate']]
+new2.to_csv('/Users/ligk2e/Desktop/Anu/e4000/reference.txt',sep='\t',header=None,index=None)
+
+
+# a chi-square analysis, does pam-50 defined groups are independnt regarding their distribution in high and low group
+group = pd.read_csv('/Users/ligk2e/Desktop/group.txt',sep='\t')
+
+pam50_dic = {}
+for i in range(group.shape[0]):
+    subtype = group['PAM50-mRNA'].iloc[i]
+    tcga = group['Complete-TCGA-ID'].iloc[i]
+    pam50_dic[tcga] = subtype
+
+df = pd.read_csv('/Users/ligk2e/Desktop/final.txt',sep='\t',header=None)
+
+# the contigency table would be 2*4
+'''
+------------------------------------------------
+       | basal  | her2  | luminalA | luminal B |
+------------------------------------------------
+high   |   20   |   7   |     30   |     32    |
+------------------------------------------------
+low    |   25   |  14   |   69     |      21   |
+----------------------------------------------
+'''
+
+stratification = pd.read_csv('/Users/ligk2e/Desktop/stratification.txt',sep='\t')
+
+# reverse pam50_dic
+pam50_dic_reverse = {}
+for k,v in pam50_dic.items():
+    try:
+        pam50_dic_reverse[v].append(k)
+    except KeyError:
+        pam50_dic_reverse[v] = []
+        pam50_dic_reverse[v].append(k)
+
+# construct a dic for high,low
+hl_f = {}
+hl_b = {}
+for i in range(stratification.shape[0]):
+    tcga = stratification['TCGA-ID'].iloc[i]
+    belong = stratification['label'].iloc[i]
+    try:
+        hl_f[belong].append(tcga)
+    except KeyError:
+        hl_f[belong] = []
+        hl_f[belong].append(tcga)
+    hl_b[tcga] = belong
+
+
+def extracting(pam50_dic_reverse,hl_b,subtype):
+    # 'Basal-like' 'HER2-enriched' 'Luminal A' 'Luminal B'
+    patients = pam50_dic_reverse[subtype]
+    high_count,low_count = 0,0
+    for i in patients:
+        try:
+            label = hl_b[i]
+        except:
+            continue
+        if label == 'high':
+            high_count += 1
+        elif label == 'low':
+            low_count += 1
+    return high_count,low_count
+
+high_basal, low_basal = extracting(pam50_dic_reverse,hl_b,'Basal-like')
+high_her2, low_her2 = extracting(pam50_dic_reverse,hl_b,'HER2-enriched')
+high_la,low_la = extracting(pam50_dic_reverse,hl_b,'Luminal A')
+high_lb, low_lb = extracting(pam50_dic_reverse,hl_b,'Luminal B')
+
+contigency = np.empty([2,4])
+contigency[0,0] = high_basal
+contigency[1,0] = low_basal
+contigency[0,1] = high_her2
+contigency[1,1] = low_her2
+contigency[0,2] = high_la
+contigency[1,2] = low_la
+contigency[0,3] = high_lb
+contigency[1,3] = low_lb
+contigency = contigency.astype(np.int)
+
+import scipy.stats as sc
+obs_all = sc.chi2_contingency(contigency)   # for all   # 0.003 !!!!!
+obs_basal_her2 = sc.chi2_contingency(contigency[:,0:2])   # 0.55
+obs_basal_luminalA = sc.chi2_contingency(contigency[:,[0,2]])  # 0.14
+obs_basal_luminalB = sc.chi2_contingency(contigency[:,[0,3]])  # 0.17
+
+obs_her2_luminalA = sc.chi2_contingency(contigency[:,[1,2]])   # 0.98
+obs_her2_luminalB = sc.chi2_contingency(contigency[:,[1,3]])   # 0.06 !!!!!
+obs_luminalA_luminalB = sc.chi2_contingency(contigency[:,[2,3]])    # 0.00062   !!!!!!
+
+
 

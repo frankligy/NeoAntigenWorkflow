@@ -61,13 +61,17 @@ def dic_to_list(dic):
             lis.append(0.00001)
     return np.array(lis)
 
-
+def array_to_count(array):
+    length = len(array)
+    counter = collections.Counter(array)
+    return {k:v for k,v in counter.items()}
 
 
 def convert_to_prob(array):
     slots = np.empty([21,56],dtype=np.float32)
     for j in range(array.shape[1]):
-        dic = array_to_prob(array[:,j])
+        #dic = array_to_prob(array[:,j])
+        dic = array_to_count(array[:,j])
         lis = dic_to_list(dic)
         slots[:,j] = lis
     return slots
@@ -114,6 +118,31 @@ def dict_inventory(inventory):
 
     return dic
 
+def paratope_dic(hla):
+    df = hla
+    dic = {}
+    for i in range(df.shape[0]):
+        hla = df['hla'].iloc[i]
+        paratope = df['paratope'].iloc[i]
+        dic[hla] = paratope
+    return dic
+
+def rescue_unknown_hla(hla, dic_inventory):
+    type_ = hla[4]
+    first2 = hla[6:8]
+    last2 = hla[8:]
+    big_category = dic_inventory[type_]
+    #print(hla)
+    if not big_category.get(first2) == None:
+        small_category = big_category.get(first2)
+        distance = [abs(int(last2) - int(i)) for i in small_category]
+        optimal = min(zip(small_category, distance), key=lambda x: x[1])[0]
+        return 'HLA-' + str(type_) + '*' + str(first2) + str(optimal)
+    else:
+        small_category = list(big_category.keys())
+        distance = [abs(int(first2) - int(i)) for i in small_category]
+        optimal = min(zip(small_category, distance), key=lambda x: x[1])[0]
+        return 'HLA-' + str(type_) + '*' + str(optimal) + str(big_category[optimal][0])
 
 if __name__ == '__main__':
     hla = pd.read_csv('hla2paratopeTable_aligned.txt',sep='\t',header=None,names=['hla','paratope'])
@@ -128,8 +157,14 @@ if __name__ == '__main__':
 
     neg_array = construct_aa_array(neg)
     pos_array = construct_aa_array(pos)
+
+    # to do a chi square hypothesis test of independence
     neg_dis = convert_to_prob(neg_array)
     pos_dis = convert_to_prob(pos_array)
+
+    neg_dis
+
+
 
     # compute KL divergence
     realKL = KL(neg_dis,pos_dis)

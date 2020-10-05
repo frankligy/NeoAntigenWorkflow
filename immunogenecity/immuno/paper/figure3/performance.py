@@ -393,6 +393,84 @@ def pull_label_aaindex(dataset):
         result[i,:] = dataset[i][2]
     return result
 
+
+def add_X(array):
+    me = np.mean(array)
+    array = np.append(array, me)
+    return array
+
+
+def read_index(path):
+    with open(path, 'r') as f:
+        data = f.readlines()
+        array = []
+        for line in data:
+            line = line.lstrip(' ').rstrip('\n')
+            line = re.sub(' +', ' ', line)
+
+            items = line.split(' ')
+            items = [float(i) for i in items]
+            array.extend(items)
+        array = np.array(array)
+        array = add_X(array)
+        Index = collections.namedtuple('Index',
+                                       ['A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S',
+                                        'T', 'W', 'Y', 'V', 'X'])
+        I = Index._make(array)
+    return I, array  # namedtuple
+
+
+def read_all_indices():
+    table = np.empty([21, 566])
+    for i in range(566):
+        if len(str(i)) == 1:
+            ii = '00' + str(i)
+        elif len(str(i)) == 2:
+            ii = '0' + str(i)
+        else:
+            ii = str(i)
+
+        NA_list_str = ['472', '473', '474', '475', '476', '477', '478', '479', '480', '481', '520', '523', '524']
+        NA_list_int = [int(i) for i in NA_list_str]
+        if ii in NA_list_str: continue
+
+        path = '/Users/ligk2e/Desktop/NeoAntigenWorkflow/immunogenecity/AAindex1/index{0}.txt'.format(ii)
+
+        _, array = read_index(path)
+
+        table[:, i] = array
+    table = np.delete(table, NA_list_int, 1)
+    return table
+
+
+def scaling(table):  # scale the features
+    table_scaled = RobustScaler().fit_transform(table)
+    return table_scaled
+
+
+def wrapper_read_scaling():
+    table = read_all_indices()
+    table_scaled = scaling(table)
+    return table_scaled
+
+
+def pca_get_components(result):
+    pca= PCA()
+    pca.fit(result)
+    result = pca.explained_variance_ratio_
+    sum_ = 0
+    for index,var in enumerate(result):
+        sum_ += var
+        if sum_ > 0.95:
+            return index    # 25 components
+
+
+
+def pca_apply_reduction(result):   # if 95%, 12 PCs, if 99%, 17 PCs, if 90%,9 PCs
+    pca = PCA(n_components=12)  # or strictly speaking ,should be 26, since python is 0-index
+    new = pca.fit_transform(result)
+    return new
+
 if __name__ == '__main__':
     # instantiate two models
     ResLikeCNN = model()

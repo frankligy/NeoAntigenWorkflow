@@ -97,6 +97,8 @@ class model_aaindex(keras.Model):
         x2 = keras.Input(shape=(46,12,1))
         return keras.Model(inputs=[x1,x2],outputs=self.call([x1,x2]))
 
+
+
 def aaindex(peptide,after_pca):
 
     amino = 'ARNDCQEGHILKMFPSTWYV-'
@@ -189,6 +191,10 @@ def extract_all_positive(hard,dataset):
             result.append(correct_label(dataset[i]))
     return result
 
+class CustomCallback(keras.callbacks.Callback):
+    def on_epoch_end(self,epoch,logs=None):
+        if logs.get('accuracy') > 0.98:
+            self.model.stop_training = True
 
 
 if __name__ == '__main__':
@@ -226,16 +232,18 @@ if __name__ == '__main__':
 
     ResLikeCNN_index.compile(
         loss='binary_crossentropy',
-        optimizer=keras.optimizers.Adam(lr=0.001),
+        optimizer=keras.optimizers.Adam(lr=0.0001),
         metrics=['accuracy']
     )
+    callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=4)
     history = ResLikeCNN_index.fit(
         x=[input1,input2],   # feed a list into
         y=label,
         validation_data = ([input1_val,input2_val],label_val),
-        batch_size=512,
-        epochs=9,
-        class_weight = {0:0.5,1:0.5}   # I have 20% positive and 80% negative in my training data
+        batch_size=1024,
+        epochs=200,
+        class_weight = {0:0.2,1:0.8},   # I have 20% positive and 80% negative in my training data
+        callbacks = [CustomCallback(),]
     )
 
     # now let's test in external dataset
@@ -253,6 +261,7 @@ if __name__ == '__main__':
     accuracy_score(label_test, hard)
     draw_ROC(label_test, result)
     draw_PR(label_test, result)
+
 
 
 
@@ -291,7 +300,7 @@ if __name__ == '__main__':
 
 
 
-    ResLikeCNN_index.save_weights('aaindex12_encoding_ReslikeCNN_reproduce/')
+    ResLikeCNN_index.save_weights('aaindex12_encoding_ReslikeCNN_epoch20/')
 
 
     ResLikeCNN_index.save_weights('GAN_augmented/')
